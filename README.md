@@ -46,7 +46,7 @@ Global flags: `--json`, `--config`, `--dry-run`, `--actor`, `--verbose`, `--quie
    ```sh
    ( umask 077; mkdir -p ~/.config/ha-notice; echo 'export HA_TOKEN=...' >> ~/.config/ha-notice/env )
    # crontab (absolute binary path, from `command -v ha-notice`; the schedule is a placeholder):
-   # */15 * * * * set -a; . ~/.config/ha-notice/env; set +a; /home/you/.local/bin/ha-notice send --stdin-json --json --actor auto:cron < msg.json
+   # */15 * * * * set -a; . ~/.config/ha-notice/env; set +a; "$HOME/.local/bin/ha-notice" send --stdin-json --json --actor auto:cron < msg.json
    ```
 
    The `>>` never truncates an existing file, so a second run adds a second line and the last one wins. Cron runs the tool with `--config <path>` when your config is not in the default place. The variable name must start with `HA_` (`token_env` is restricted to that); a token kept under another name is aliased to `HA_TOKEN` in this env file.
