@@ -1,33 +1,283 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ha-notice/log",
+  "$id": "ha-notice/log.json",
   "title": "ha-notice log.jsonl record",
+  "description": "One record per send outcome that reaches step 3 (input) or later: sent, refused (exit 20), outcome_unknown (exit 12 whenever the envelope's unknown_outcome is true, and exit 1 with unknown_outcome true after the gate reached writing) or failed (any other exit 12). Not logged: any other exit 1, exit 2, exit 22, a signal exit 128+N and dry runs. Never contains a title, message, link, base URL, service name or credential. A field that does not apply is null.",
   "type": "object",
   "properties": {
     "ts": {
-      "type": "string",
-      "format": "date-time"
+      "$ref": "defs.json#/$defs/ts"
     },
-    "level": {
+    "tool": {
+      "$ref": "defs.json#/$defs/tool"
+    },
+    "version": {
       "type": "string",
+      "maxLength": 64
+    },
+    "outcome": {
       "enum": [
-        "debug",
-        "info",
-        "warn",
-        "error"
+        "sent",
+        "refused",
+        "failed",
+        "outcome_unknown"
+      ],
+      "description": "sent: exit 0; refused: exit 20; outcome_unknown: exit 12 with unknown_outcome true (outcome_unknown, upstream_error, or a wrong_host_response for a 2xx) or exit 1 with code internal (the request may have been sent); failed: any other exit 12."
+    },
+    "exit": {
+      "enum": [
+        0,
+        1,
+        12,
+        20
+      ],
+      "description": "Only exits that reach step 3 or later are logged; exit 1 only when the request may have been sent (outcome_unknown, code internal)."
+    },
+    "code": {
+      "oneOf": [
+        {
+          "$ref": "defs.json#/$defs/error_code"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
-    "event": {
-      "type": "string"
+    "reason": {
+      "oneOf": [
+        {
+          "$ref": "defs.json#/$defs/refusal_reason"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
-    "message": {
-      "type": "string"
+    "level": {
+      "oneOf": [
+        {
+          "$ref": "defs.json#/$defs/level"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "truncated": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "From the start of input reading to the moment the result was fixed (just before it is printed); never null."
+    },
+    "http_status": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 100,
+      "maximum": 599
+    },
+    "message_sha256": {
+      "oneOf": [
+        {
+          "$ref": "defs.json#/$defs/sha16"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dedupe_key_sha256": {
+      "oneOf": [
+        {
+          "$ref": "defs.json#/$defs/sha16"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tag_set": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Null when no request was built."
+    },
+    "actor": {
+      "$ref": "defs.json#/$defs/actor"
+    },
+    "actor_source": {
+      "$ref": "defs.json#/$defs/actor_source"
     }
   },
   "required": [
     "ts",
+    "tool",
+    "version",
+    "outcome",
+    "exit",
+    "code",
+    "reason",
     "level",
-    "event"
+    "bytes",
+    "truncated",
+    "duration_ms",
+    "http_status",
+    "message_sha256",
+    "dedupe_key_sha256",
+    "tag_set",
+    "actor",
+    "actor_source"
   ],
-  "additionalProperties": true
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "sent"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit": {
+            "const": 0
+          },
+          "code": {
+            "type": "null"
+          },
+          "reason": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "refused"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit": {
+            "const": 20
+          },
+          "code": {
+            "const": "refused"
+          },
+          "reason": {
+            "$ref": "defs.json#/$defs/refusal_reason"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit": {
+            "const": 12
+          },
+          "code": {
+            "enum": [
+              "host_rejected",
+              "auth_required",
+              "credential_invalid",
+              "rate_limited",
+              "network_error",
+              "wrong_host_response",
+              "unavailable"
+            ]
+          },
+          "reason": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "outcome_unknown"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "null"
+          }
+        },
+        "anyOf": [
+          {
+            "properties": {
+              "exit": {
+                "const": 12
+              },
+              "code": {
+                "enum": [
+                  "outcome_unknown",
+                  "upstream_error",
+                  "wrong_host_response"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "exit": {
+                "const": 1
+              },
+              "code": {
+                "const": "internal"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "exit": {
+            "const": 1
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "outcome_unknown"
+          },
+          "code": {
+            "const": "internal"
+          }
+        }
+      }
+    }
+  ]
 }

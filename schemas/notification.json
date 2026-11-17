@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ha-notice/notification.json",
+  "title": "ha-notice notification (input)",
+  "description": "The JSON object read by send --stdin-json or --file. Unknown fields exit 20 invalid_payload. Sanitizing, the cut of a title to 256 characters after sanitizing, the empty-message check (message has no minLength here; an absent message is also empty_message), the command-keyword check and the exact link rule are applied by the tool and are not expressible here.",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "x-untrusted": true,
+      "maxLength": 100000,
+      "description": "Untrusted. At most 100000 characters of input (more is exit 20 invalid_payload); cut at 256 characters after sanitizing with an ellipsis and truncated: true; one line (newlines become spaces)."
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 100000,
+      "x-untrusted": true,
+      "description": "Untrusted. At most 100000 characters of input; must not be empty after sanitizing or absent (empty_message) and must not be a command message."
+    },
+    "level": {
+      "$ref": "defs.json#/$defs/level",
+      "default": "info"
+    },
+    "link": {
+      "type": "string",
+      "pattern": "^[\\x21-\\x7e]{1,1024}(?![\\s\\S])",
+      "maxLength": 1024,
+      "description": "Coarse gate only: 1 to 1024 printable ASCII characters (U+0021 to U+007E). The tool is authoritative: scheme (case-insensitive http or https), host, port and the reasons link_invalid and link_scheme."
+    }
+  },
+  "required": [
+    "message"
+  ],
+  "additionalProperties": false
+}

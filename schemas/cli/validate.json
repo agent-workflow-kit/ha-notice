@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ha-notice/cli/validate.json",
+  "title": "validate output",
+  "description": "Printed with --json when the config loads: either the checks document or, for --probe or --test-message on a tool with enabled false, {\"outcome\":\"disabled\"} (exit 22, before any check). enabled in the checks document is the configured value; plain validate ignores it except to report it and runs all its checks. Checks run in the order config, credential, probe, test_message; a failed check ends the run and later checks are omitted, so ok is true only when every printed check is ok. Exit 0 when ok, else the exit code of the failing check (config 2; every other check 12). When the config cannot load, the output is the error envelope with exit 2. probe is present whenever the probe check ran. There is no warnings key.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "probe": {
+          "type": "object",
+          "description": "Present whenever the probe check ran (--probe); api_ok is false on any failure.",
+          "properties": {
+            "api_ok": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "api_ok"
+          ],
+          "additionalProperties": false
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "enum": [
+                  "config",
+                  "credential",
+                  "probe",
+                  "test_message"
+                ]
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 1024,
+                "description": "A fixed string of the tool. Never contains the token."
+              }
+            },
+            "required": [
+              "name",
+              "ok",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "ok",
+        "enabled",
+        "checks"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "properties": {
+                    "ok": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "checks"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ok": {
+                "const": false
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "ok": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "const": "disabled"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}
