@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ha-notice/log.json",
   "title": "ha-notice log.jsonl record",
-  "description": "One record per send that reaches the request and per refusal or failure. Never contains a title, message, link, base URL, service name or credential. A field that does not apply is null.",
+  "description": "One record per send outcome that reaches step 3 (input) or later: sent, refused (exit 20), failed (exit 12 except outcome_unknown) or outcome_unknown. Not logged: exit 1, exit 2, exit 22 and dry runs. Never contains a title, message, link, base URL, service name or credential. A field that does not apply is null.",
   "type": "object",
   "properties": {
     "ts": {
@@ -20,12 +20,17 @@
         "sent",
         "refused",
         "failed",
-        "unknown"
+        "outcome_unknown"
       ],
-      "description": "sent: accepted; refused: exit 20; failed: exit 1, 2 or 12 except outcome_unknown; unknown: outcome_unknown."
+      "description": "sent: accepted; refused: exit 20; failed: exit 12 except outcome_unknown; outcome_unknown: code outcome_unknown."
     },
     "exit": {
-      "$ref": "defs.json#/$defs/exit_code"
+      "enum": [
+        0,
+        12,
+        20
+      ],
+      "description": "Only exits that reach step 3 or later are logged."
     },
     "code": {
       "oneOf": [
@@ -131,5 +136,104 @@
     "actor",
     "actor_source"
   ],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "sent"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit": {
+            "const": 0
+          },
+          "code": {
+            "type": "null"
+          },
+          "reason": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "refused"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit": {
+            "const": 20
+          },
+          "code": {
+            "const": "refused"
+          },
+          "reason": {
+            "$ref": "defs.json#/$defs/refusal_reason"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit": {
+            "const": 12
+          },
+          "code": {
+            "enum": [
+              "host_rejected",
+              "auth_required",
+              "permission_denied",
+              "rate_limited",
+              "upstream_error",
+              "network_error",
+              "wrong_host_response",
+              "state_unsafe"
+            ]
+          },
+          "reason": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "outcome_unknown"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit": {
+            "const": 12
+          },
+          "code": {
+            "const": "outcome_unknown"
+          },
+          "reason": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
 }

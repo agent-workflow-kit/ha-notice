@@ -12,7 +12,7 @@ L1 primitive: send one notification through a Home Assistant `notify` service ov
 |---|---|---|---|
 | Home Assistant REST API over HTTP(S) | L0 third party | none (not an edge of the tool graph) | One POST per notification; two read-only GETs for `validate --probe`; see [Home Assistant edge](interface.md#home-assistant-edge). |
 | Python standard library HTTP client | L0 | none | No third-party HTTP dependency. |
-| Pydantic (config validation) | library | none | Required by the design guide for config; the only third-party runtime dependency. |
+| Pydantic (config validation) | library | none | Required by the design guide for config; the only third-party runtime dependency. The scaffold's `pyproject.toml` lists none yet: adding Pydantic is part of stage 2 (config). |
 
 No tool dependencies: ha-notice composes nothing.
 
@@ -29,7 +29,7 @@ No tool dependencies: ha-notice composes nothing.
 | D-7 | Template syntax is not escaped. | Verified on a phone: `{{ 1+1 }}` and `{% if %}` appeared literally in title and message. Residual risk recorded. |
 | D-8 | `base_url` and `service` have no default; the URL is joined without double or trailing slashes; `https` unless `allow_insecure_http`; certificate checks on unless `tls_verify: false`. See [Config](interface.md#config). | A double or trailing slash is a 404; a public default would send nothing useful and a wrong default could send a token to a wrong host. |
 | D-9 | The token only from the variable named by `token_env`, only in the `Authorization` header and only to `base_url`'s host. See [Home Assistant edge](interface.md#home-assistant-edge). | Design guide section 7. |
-| D-10 | Exit codes and outcomes as in [Exit codes](interface.md#exit-codes); exit 22 for a disabled tool; `unknown_outcome` and no automatic retry after a timeout that follows a sent request. | A caller with a tag can retry safely; one without can choose (S-7). |
+| D-10 | Exit codes and outcomes as in [Exit codes](interface.md#exit-codes); exit 20 values are reasons of `code: refused`; exit 22 for a disabled tool; `unknown_outcome` and no automatic retry after a timeout that follows a sent request. | A caller with a tag can retry safely; one without can choose (S-7). |
 | D-11 | `validate --probe` uses two read-only GETs (`/api/` and `/api/services`) and sends nothing; `--test-message` sends a marked test after confirmation. | The host's 400 is opaque, so only a probe can say which mistake was made. |
 | D-12 | No hooks in 0.x and no audit file; `config_invalid` is exit 2. See [Hooks](interface.md#hooks), [Log](interface.md#log). | As in slack-notice D-9 and D-6. |
 

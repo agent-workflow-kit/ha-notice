@@ -37,7 +37,7 @@
       ],
       "minimum": 100,
       "maximum": 599,
-      "description": "Null for a dry run."
+      "description": "Null for a dry run; an integer when sent."
     },
     "tag_set": {
       "type": "boolean"

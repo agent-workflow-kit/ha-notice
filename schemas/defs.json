@@ -71,7 +71,7 @@
         "wrong_host_response",
         "state_unsafe"
       ],
-      "description": "Exit 20 always has code refused with a reason."
+      "description": "Exit 20 always has code refused with a reason; the reasons are not codes."
     },
     "refusal_reason": {
       "enum": [
@@ -86,7 +86,7 @@
     "error_details": {
       "type": "object",
       "x-untrusted": true,
-      "description": "Untrusted: may hold payload field names or host text. By code: config_invalid -> key; invalid_payload -> pointer; credential_missing -> env; host_rejected -> http_status, hint, service; network_error -> tls.",
+      "description": "Untrusted: may hold payload field names or host text. By code or reason: code config_invalid -> key; reason invalid_payload -> pointer; reason credential_missing -> env; code host_rejected -> http_status, hint, service; code network_error -> tls.",
       "properties": {
         "key": {
           "type": "string",
@@ -158,7 +158,7 @@
             "boolean",
             "null"
           ],
-          "description": "Set on exit 12; null elsewhere."
+          "description": "A boolean on exit 12, null elsewhere."
         },
         "retry_after_s": {
           "type": [
@@ -172,14 +172,300 @@
             "boolean",
             "null"
           ],
-          "description": "True when the request may have been delivered."
+          "description": "A boolean on exit 12 (true when the request may have been delivered), null elsewhere."
         }
       },
       "required": [
         "code",
         "message"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "host_rejected",
+                  "auth_required",
+                  "permission_denied",
+                  "rate_limited",
+                  "upstream_error",
+                  "network_error",
+                  "outcome_unknown",
+                  "wrong_host_response",
+                  "state_unsafe"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "retryable",
+              "unknown_outcome"
+            ],
+            "properties": {
+              "retryable": {
+                "type": "boolean"
+              },
+              "unknown_outcome": {
+                "type": "boolean"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "retryable": {
+                "type": "null"
+              },
+              "unknown_outcome": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "state_unsafe",
+                  "host_rejected",
+                  "auth_required",
+                  "permission_denied"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "retryable",
+              "unknown_outcome"
+            ],
+            "properties": {
+              "retryable": {
+                "const": false
+              },
+              "unknown_outcome": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "rate_limited",
+                  "upstream_error"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "retryable",
+              "unknown_outcome"
+            ],
+            "properties": {
+              "retryable": {
+                "const": true
+              },
+              "unknown_outcome": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "outcome_unknown"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "retryable",
+              "unknown_outcome"
+            ],
+            "properties": {
+              "retryable": {
+                "const": true
+              },
+              "unknown_outcome": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "wrong_host_response"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "retryable": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "network_error"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "unknown_outcome": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "refused"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "reason"
+            ],
+            "properties": {
+              "reason": {
+                "$ref": "#/$defs/refusal_reason"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "invalid_payload"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "required": [
+              "details"
+            ],
+            "properties": {
+              "details": {
+                "type": "object",
+                "required": [
+                  "pointer"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "credential_missing"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "required": [
+              "details"
+            ],
+            "properties": {
+              "details": {
+                "type": "object",
+                "required": [
+                  "env"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "config_invalid"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "details"
+            ],
+            "properties": {
+              "details": {
+                "type": "object",
+                "required": [
+                  "key"
+                ]
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

@@ -2,11 +2,28 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ha-notice/cli/validate.json",
   "title": "validate output",
-  "description": "Printed with --json. ok is true when every check passes (exit 0). When a check fails, the exit is 2 config_invalid or 20 credential_missing and the output is the error envelope.",
+  "description": "Printed with --json when the config loads. ok is true when every check passes (exit 0); otherwise ok is false and the exit is the exit code of the first failing check (20 refused with a reason, 12 for tool or host problems). When the config cannot load, the output is the error envelope with exit 2. probe is present only with --probe; a check named test_message is present only with --test-message.",
   "type": "object",
   "properties": {
     "ok": {
       "type": "boolean"
+    },
+    "probe": {
+      "type": "object",
+      "description": "Present only with --probe. service_found is false when the API call failed.",
+      "properties": {
+        "api_ok": {
+          "type": "boolean"
+        },
+        "service_found": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "api_ok",
+        "service_found"
+      ],
+      "additionalProperties": false
     },
     "checks": {
       "type": "array",

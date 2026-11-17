@@ -7,7 +7,7 @@
 # level_prefix and level_data cannot be set from the environment.
 # Schema: schemas/config.json. Invalid config exits 2 (config_invalid), naming the key.
 
-# false makes `send` print {"outcome": "disabled"} and exit 22 without reading the token.
+# false makes `send` print {"outcome": "disabled"} and exit 22 without reading input or the token.
 enabled: true
 
 # REQUIRED, no default. Home Assistant base URL: https://host[:port][/prefix]. No userinfo, query
@@ -22,10 +22,10 @@ service: mobile_app_your_phone
 # belongs in this file.
 token_env: HA_TOKEN
 
-# Allow an http:// base_url. The token then travels in cleartext. Warned about on every send.
+# Allow an http:// base_url. The token then travels in cleartext. Warns on stderr on every send.
 allow_insecure_http: false
 
-# false disables certificate checks (self-signed servers). Warned about on every send.
+# false disables certificate checks (self-signed servers). Warns on stderr on every send.
 tls_verify: true
 
 # Extra CA bundle path for a private certificate authority. Unset by default.
@@ -64,7 +64,7 @@ tag_from_dedupe_key: true
 max_chars: 4000
 
 # Budget for one send, retries included: 1s to 120s. Seconds as a number, or <number><unit> with
-# unit ms, s or m ("10s").
+# unit ms, s or m ("10s", "1m", "500ms"); the range is checked at load (exit 2 config_invalid).
 timeout: 10s
 
 # false writes no ~/.local/state/ha-notice/log.jsonl.

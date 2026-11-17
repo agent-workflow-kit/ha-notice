@@ -2,13 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ha-notice/notification.json",
   "title": "ha-notice notification (input)",
-  "description": "The JSON object read by send --stdin-json or --file. Unknown fields exit 20 invalid_payload. Sanitizing, the 256-character title limit after sanitizing, the empty-message check and the command-keyword check are applied by the tool and are not expressible here.",
+  "description": "The JSON object read by send --stdin-json or --file. Unknown fields exit 20 invalid_payload. Sanitizing, the cut of a title to 256 characters after sanitizing, the empty-message check and the command-keyword check are applied by the tool and are not expressible here.",
   "type": "object",
   "properties": {
     "title": {
       "type": "string",
       "x-untrusted": true,
-      "description": "Untrusted. At most 256 characters after sanitizing; one line (newlines become spaces). No input maxLength because sanitizing can shorten it."
+      "maxLength": 100000,
+      "description": "Untrusted. At most 100000 characters of input (more is exit 20 invalid_payload); cut at 256 characters after sanitizing with an ellipsis and truncated: true; one line (newlines become spaces)."
     },
     "message": {
       "type": "string",
@@ -25,7 +26,7 @@
       "type": "string",
       "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#@\\u0000-\\u001f\\u007f]+(?:[/?#][^\\s\\u0000-\\u001f\\u007f]*)?$",
       "maxLength": 1024,
-      "description": "http or https URL, no whitespace or control characters, no userinfo."
+      "description": "Syntactic gate only: http or https URL, no whitespace or control characters, no userinfo, at most 1024 characters. The tool names link_invalid or link_scheme."
     }
   },
   "required": [

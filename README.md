@@ -13,9 +13,9 @@ L1 (primitive). Works fully standalone; it does not need the `awkit` harness.
 ## What it does
 
 - Sends a notification (`title`, `message`, `level`, `link`) to the `notify` service named in your config, with the access token read from the environment variable named by `token_env`.
-- Sanitizes text, adds a per-level title prefix (`WARN:`, `ACTION:`, `ERROR:` by default), cuts long messages and builds the request from an allowlist only ([Rendering](docs/interface.md#rendering)).
+- Sanitizes text, adds a per-level title prefix (`WARN:`, `ACTION:`, `ERROR:` by default), cuts long titles and messages and builds the request from an allowlist only ([Rendering](docs/interface.md#rendering)).
 - Can derive a notification tag from `--dedupe-key`, so a retry replaces the earlier notification instead of showing twice.
-- Is stateless: it keeps no database, only a log of what it sent (never the text). When to send, what to send and how often are your caller's decisions.
+- Is stateless: it keeps no database, only a log of what it sent or refused (never the text); dry runs, usage errors and disabled runs are not logged. When to send, what to send and how often are your caller's decisions.
 
 ## Quick start
 
@@ -32,7 +32,7 @@ ha-notice send --message "Preview only" --dry-run --json
 | Command | Purpose |
 |---|---|
 | `ha-notice send [--stdin-json \| --file <path>\|-] [--title <t>] [--message <m>] [--level <l>] [--link <url>] [--dedupe-key <k>]` | Send one notification. Text comes from stdin JSON, a file or flags; flags are for humans. |
-| `ha-notice validate [--probe] [--test-message]` | Check the config and the token variable; `--probe` also checks the host and the service with two read-only calls; `--test-message` then sends one marked test after confirmation. |
+| `ha-notice validate [--probe] [--test-message]` | Check the config and the token variable; `--probe` also checks the host and the service with two read-only calls (output gains `probe: {api_ok, service_found}`); `--test-message` then sends one marked test after confirmation and adds a `test_message` check. Exit 0 when every check passes, else the exit code of the first failing check. |
 
 Global flags: `--json`, `--config`, `--dry-run`, `--yes`, `--actor`, `--verbose`, `--quiet`, `--version` ([Global flags](docs/interface.md#global-flags)).
 
@@ -57,7 +57,7 @@ Global flags: `--json`, `--config`, `--dry-run`, `--yes`, `--actor`, `--verbose`
 
 ## Exit codes
 
-0 sent or dry run, 1 internal error, 2 usage or invalid config, 12 failed (with a `code`), 20 refused with a `reason`, 22 nothing sent because the tool is disabled (a no-op, not an error). See [Exit codes](docs/interface.md#exit-codes).
+0 sent or dry run, 1 internal error, 2 usage or invalid config, 12 failed (with a `code`), 20 refused (`code: refused` with a `reason` such as `invalid_payload` or `credential_missing`), 22 nothing sent because the tool is disabled (a no-op, not an error). See [Exit codes](docs/interface.md#exit-codes).
 
 ## Config and environment
 
