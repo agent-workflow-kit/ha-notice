@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ha-notice/cli/send.json",
+  "title": "send output",
+  "description": "Printed with --json on exit 0 (sent or dry run) and exit 22 (disabled, which prints only outcome). Errors print the error envelope.",
+  "type": "object",
+  "properties": {
+    "outcome": {
+      "enum": [
+        "sent",
+        "dry_run",
+        "disabled"
+      ]
+    },
+    "tool": {
+      "$ref": "../defs.json#/$defs/tool"
+    },
+    "level": {
+      "$ref": "../defs.json#/$defs/level"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "UTF-8 size of the request body."
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "http_status": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 100,
+      "maximum": 599,
+      "description": "Null for a dry run."
+    },
+    "tag_set": {
+      "type": "boolean"
+    },
+    "dedupe_key": {
+      "oneOf": [
+        {
+          "$ref": "../defs.json#/$defs/dedupe_key"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The caller's own key, echoed; null when none was given."
+    },
+    "rendered": {
+      "type": "object",
+      "x-untrusted": true,
+      "description": "Untrusted: the JSON body that would be sent (title and data omitted when empty). No secrets.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 20100
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "outcome"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "disabled"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "outcome": {}
+        },
+        "maxProperties": 1
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "enum": [
+              "sent",
+              "dry_run"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "outcome",
+          "tool",
+          "level",
+          "truncated",
+          "bytes",
+          "duration_ms",
+          "http_status",
+          "tag_set",
+          "dedupe_key"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "dry_run"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "rendered"
+        ],
+        "properties": {
+          "http_status": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "sent"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "required": [
+            "rendered"
+          ]
+        },
+        "properties": {
+          "http_status": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  ]
+}

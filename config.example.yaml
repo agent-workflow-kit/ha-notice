@@ -1,4 +1,71 @@
-# Example config for ha-notice. Location: ~/.config/ha-notice/config.yaml (drop-ins: config.d/*.yaml).
-# Keys are defined in docs/interface.md once designed.
-# token_env: ...
-hooks: {}
+# ha-notice example config: every key with its built-in default.
+# Location: ~/.config/ha-notice/config.yaml (XDG_CONFIG_HOME respected), plus config.d/*.yaml in
+# lexical order; --config <path> reads another file (drop-ins are read next to it).
+# Drop-ins: maps merge, other lists replace.
+# Precedence: flags, then environment (scalar keys only), then config, then defaults.
+# Environment: HA_NOTICE_<KEY> sets a scalar key (HA_NOTICE_BASE_URL, HA_NOTICE_SERVICE, ...);
+# level_prefix and level_data cannot be set from the environment.
+# Schema: schemas/config.json. Invalid config exits 2 (config_invalid), naming the key.
+
+# false makes `send` print {"outcome": "disabled"} and exit 22 without reading the token.
+enabled: true
+
+# REQUIRED, no default. Home Assistant base URL: https://host[:port][/prefix]. No userinfo, query
+# or fragment; trailing slashes are stripped. http:// only with allow_insecure_http: true.
+base_url: https://homeassistant.example:8123
+
+# REQUIRED, no default. The notify service name (a mobile_app_ service for a phone).
+# Pattern: lowercase letters, digits and underscores, at most 64 characters.
+service: mobile_app_your_phone
+
+# Name of the environment variable holding a long-lived access token. The token itself never
+# belongs in this file.
+token_env: HA_TOKEN
+
+# Allow an http:// base_url. The token then travels in cleartext. Warned about on every send.
+allow_insecure_http: false
+
+# false disables certificate checks (self-signed servers). Warned about on every send.
+tls_verify: true
+
+# Extra CA bundle path for a private certificate authority. Unset by default.
+# ca_file: /path/to/ca-bundle.pem
+
+# Title prefixes per level, one line of at most 16 characters each. Empty string: no prefix.
+level_prefix:
+  info: ""
+  warn: "WARN:"
+  action: "ACTION:"
+  error: "ERROR:"
+
+# Per-level `data` keys added to the request. Default: {} (nothing added). Allowlisted keys only:
+#   group       ^[A-Za-z0-9_ -]{1,64}$
+#   importance  min | low | default | high | max
+#   channel     ^[A-Za-z0-9_ -]{1,64}$
+#   ttl         integer 0 to 86400
+#   priority    normal | high
+#   push        {interruption-level: passive | active | time-sensitive | critical}
+# Levels: info, warn, action, error. Example (commented out):
+# level_data:
+#   error:
+#     importance: high
+#     channel: alerts
+#     push:
+#       interruption-level: time-sensitive
+level_data: {}
+
+# data.group for every notification. Unset by default; ^[A-Za-z0-9_ -]{1,64}$.
+# default_group: awkit
+
+# Derive data.tag from --dedupe-key so a retry replaces the earlier notification.
+tag_from_dedupe_key: true
+
+# Message limit in characters (500 to 20000). Longer messages are cut and end with "…[truncated]".
+max_chars: 4000
+
+# Budget for one send, retries included: 1s to 120s. Seconds as a number, or <number><unit> with
+# unit ms, s or m ("10s").
+timeout: 10s
+
+# false writes no ~/.local/state/ha-notice/log.jsonl.
+log: true

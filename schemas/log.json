@@ -1,33 +1,135 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ha-notice/log",
+  "$id": "ha-notice/log.json",
   "title": "ha-notice log.jsonl record",
+  "description": "One record per send that reaches the request and per refusal or failure. Never contains a title, message, link, base URL, service name or credential. A field that does not apply is null.",
   "type": "object",
   "properties": {
     "ts": {
-      "type": "string",
-      "format": "date-time"
+      "$ref": "defs.json#/$defs/ts"
     },
-    "level": {
+    "tool": {
+      "$ref": "defs.json#/$defs/tool"
+    },
+    "version": {
       "type": "string",
+      "maxLength": 64
+    },
+    "outcome": {
       "enum": [
-        "debug",
-        "info",
-        "warn",
-        "error"
+        "sent",
+        "refused",
+        "failed",
+        "unknown"
+      ],
+      "description": "sent: accepted; refused: exit 20; failed: exit 1, 2 or 12 except outcome_unknown; unknown: outcome_unknown."
+    },
+    "exit": {
+      "$ref": "defs.json#/$defs/exit_code"
+    },
+    "code": {
+      "oneOf": [
+        {
+          "$ref": "defs.json#/$defs/error_code"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
-    "event": {
-      "type": "string"
+    "reason": {
+      "oneOf": [
+        {
+          "$ref": "defs.json#/$defs/refusal_reason"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
-    "message": {
-      "type": "string"
+    "level": {
+      "oneOf": [
+        {
+          "$ref": "defs.json#/$defs/level"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "duration_ms": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "http_status": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 100,
+      "maximum": 599
+    },
+    "message_sha256": {
+      "oneOf": [
+        {
+          "$ref": "defs.json#/$defs/sha16"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dedupe_key_sha256": {
+      "oneOf": [
+        {
+          "$ref": "defs.json#/$defs/sha16"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tag_set": {
+      "type": "boolean"
+    },
+    "actor": {
+      "$ref": "defs.json#/$defs/actor"
+    },
+    "actor_source": {
+      "$ref": "defs.json#/$defs/actor_source"
     }
   },
   "required": [
     "ts",
+    "tool",
+    "version",
+    "outcome",
+    "exit",
+    "code",
+    "reason",
     "level",
-    "event"
+    "bytes",
+    "truncated",
+    "duration_ms",
+    "http_status",
+    "message_sha256",
+    "dedupe_key_sha256",
+    "tag_set",
+    "actor",
+    "actor_source"
   ],
-  "additionalProperties": true
+  "additionalProperties": false
 }

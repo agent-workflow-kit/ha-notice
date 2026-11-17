@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ha-notice/notification.json",
+  "title": "ha-notice notification (input)",
+  "description": "The JSON object read by send --stdin-json or --file. Unknown fields exit 20 invalid_payload. Sanitizing, the 256-character title limit after sanitizing, the empty-message check and the command-keyword check are applied by the tool and are not expressible here.",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "x-untrusted": true,
+      "description": "Untrusted. At most 256 characters after sanitizing; one line (newlines become spaces). No input maxLength because sanitizing can shorten it."
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100000,
+      "x-untrusted": true,
+      "description": "Untrusted. At most 100000 characters of input; must not be empty after sanitizing and must not be a command message."
+    },
+    "level": {
+      "$ref": "defs.json#/$defs/level",
+      "default": "info"
+    },
+    "link": {
+      "type": "string",
+      "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#@\\u0000-\\u001f\\u007f]+(?:[/?#][^\\s\\u0000-\\u001f\\u007f]*)?$",
+      "maxLength": 1024,
+      "description": "http or https URL, no whitespace or control characters, no userinfo."
+    }
+  },
+  "required": [
+    "message"
+  ],
+  "additionalProperties": false
+}

@@ -1,12 +1,330 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ha-notice/config",
+  "$id": "ha-notice/config.json",
   "title": "ha-notice config",
+  "description": "Merged config after config.yaml and config.d/*.yaml. Self-contained. base_url and service have no default and are required for a send; they are not required here because HA_NOTICE_BASE_URL and HA_NOTICE_SERVICE can supply them and a drop-in may hold one of them.",
   "type": "object",
   "properties": {
-    "hooks": {
-      "type": "object"
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "base_url": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#@\\u0000-\\u001f\\u007f]+(?:/[^\\s?#\\u0000-\\u001f\\u007f]*)?$",
+      "description": "https://host[:port][/prefix]; http:// only with allow_insecure_http: true. No userinfo, query or fragment. Trailing slashes are stripped."
+    },
+    "service": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]{1,64}$",
+      "description": "The notify service name, for example a mobile_app_ service."
+    },
+    "token_env": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$",
+      "default": "HA_TOKEN"
+    },
+    "allow_insecure_http": {
+      "type": "boolean",
+      "default": false
+    },
+    "tls_verify": {
+      "type": "boolean",
+      "default": true
+    },
+    "ca_file": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "level_prefix": {
+      "type": "object",
+      "properties": {
+        "info": {
+          "type": "string",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{0,16}$",
+          "description": "One line, at most 16 characters."
+        },
+        "warn": {
+          "type": "string",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{0,16}$",
+          "description": "One line, at most 16 characters."
+        },
+        "action": {
+          "type": "string",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{0,16}$",
+          "description": "One line, at most 16 characters."
+        },
+        "error": {
+          "type": "string",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{0,16}$",
+          "description": "One line, at most 16 characters."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "info": "",
+        "warn": "WARN:",
+        "action": "ACTION:",
+        "error": "ERROR:"
+      }
+    },
+    "level_data": {
+      "type": "object",
+      "properties": {
+        "info": {
+          "type": "object",
+          "properties": {
+            "group": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_ -]{1,64}$"
+            },
+            "importance": {
+              "enum": [
+                "min",
+                "low",
+                "default",
+                "high",
+                "max"
+              ]
+            },
+            "channel": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_ -]{1,64}$"
+            },
+            "ttl": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "priority": {
+              "enum": [
+                "normal",
+                "high"
+              ]
+            },
+            "push": {
+              "type": "object",
+              "properties": {
+                "interruption-level": {
+                  "enum": [
+                    "passive",
+                    "active",
+                    "time-sensitive",
+                    "critical"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "warn": {
+          "type": "object",
+          "properties": {
+            "group": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_ -]{1,64}$"
+            },
+            "importance": {
+              "enum": [
+                "min",
+                "low",
+                "default",
+                "high",
+                "max"
+              ]
+            },
+            "channel": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_ -]{1,64}$"
+            },
+            "ttl": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "priority": {
+              "enum": [
+                "normal",
+                "high"
+              ]
+            },
+            "push": {
+              "type": "object",
+              "properties": {
+                "interruption-level": {
+                  "enum": [
+                    "passive",
+                    "active",
+                    "time-sensitive",
+                    "critical"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "action": {
+          "type": "object",
+          "properties": {
+            "group": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_ -]{1,64}$"
+            },
+            "importance": {
+              "enum": [
+                "min",
+                "low",
+                "default",
+                "high",
+                "max"
+              ]
+            },
+            "channel": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_ -]{1,64}$"
+            },
+            "ttl": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "priority": {
+              "enum": [
+                "normal",
+                "high"
+              ]
+            },
+            "push": {
+              "type": "object",
+              "properties": {
+                "interruption-level": {
+                  "enum": [
+                    "passive",
+                    "active",
+                    "time-sensitive",
+                    "critical"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "group": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_ -]{1,64}$"
+            },
+            "importance": {
+              "enum": [
+                "min",
+                "low",
+                "default",
+                "high",
+                "max"
+              ]
+            },
+            "channel": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_ -]{1,64}$"
+            },
+            "ttl": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "priority": {
+              "enum": [
+                "normal",
+                "high"
+              ]
+            },
+            "push": {
+              "type": "object",
+              "properties": {
+                "interruption-level": {
+                  "enum": [
+                    "passive",
+                    "active",
+                    "time-sensitive",
+                    "critical"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "default_group": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_ -]{1,64}$"
+    },
+    "tag_from_dedupe_key": {
+      "type": "boolean",
+      "default": true
+    },
+    "max_chars": {
+      "type": "integer",
+      "minimum": 500,
+      "maximum": 20000,
+      "default": 4000
+    },
+    "timeout": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 120
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9]+(?:\\.[0-9]+)?(?:ms|s|m)$"
+        }
+      ],
+      "default": "10s",
+      "description": "Budget for one send, including retries, 1s to 120s: seconds as a number or <number><unit> with unit ms, s or m. The range of a string is checked by the tool."
+    },
+    "log": {
+      "type": "boolean",
+      "default": true
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "not": {
+          "properties": {
+            "allow_insecure_http": {
+              "const": true
+            }
+          },
+          "required": [
+            "allow_insecure_http"
+          ]
+        }
+      },
+      "then": {
+        "properties": {
+          "base_url": {
+            "pattern": "^[Hh][Tt][Tt][Pp][Ss]://"
+          }
+        }
+      }
+    }
+  ]
 }

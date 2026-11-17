@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ha-notice/cli/validate.json",
+  "title": "validate output",
+  "description": "Printed with --json. ok is true when every check passes (exit 0). When a check fails, the exit is 2 config_invalid or 20 credential_missing and the output is the error envelope.",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string",
+            "x-untrusted": true,
+            "maxLength": 1024,
+            "description": "Untrusted: may quote host text. Never contains the token."
+          }
+        },
+        "required": [
+          "name",
+          "ok",
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "ok",
+    "checks"
+  ],
+  "additionalProperties": false
+}
