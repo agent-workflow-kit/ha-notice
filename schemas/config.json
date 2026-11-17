@@ -33,7 +33,7 @@
     "ca_file": {
       "type": "string",
       "pattern": "^/[^\\u0000-\\u001f\\u007f]{0,4095}(?![\\s\\S])",
-      "description": "Extra CA bundle, an absolute path (no ~). The tool checks that it is readable."
+      "description": "Extra CA bundle, an absolute path (no ~). The tool checks that it is readable. Added to a non-empty default trust; the whole trust when the default trust is empty."
     },
     "link_hosts": {
       "type": "array",

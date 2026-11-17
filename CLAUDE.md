@@ -21,7 +21,7 @@ ha-notice is an awkit L1 primitive: send one notification through the Home Assis
 - Run `make verify` before every commit.
 - All subprocess and HTTP calls go through `src/ha_notice/gateway.py`.
 - Untrusted text travels only in files or stdin, never argv or env.
-- The token is read only from the variable named by `token_env` (it must start with `HA_`) and never appears in argv, URLs, logs, output or errors. There are no `HA_NOTICE_*` environment overrides. The config and state directory are found from the password-database home; `HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are not read.
+- The token is read only from the variable named by `token_env` (it must start with `HA_`) and never appears in argv, URLs, logs, output or errors. There are no `HA_NOTICE_*` environment overrides. The config and state directory are found from the password-database home; `HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are not read. A failed home lookup is exit 2 `config_invalid` (key `home`); there is no fallback.
 - HTTP uses `http.client` with its own TLS context: no proxies, no redirects, no `urllib`, `SSL_CERT_FILE` ignored.
 - Never run destructive git commands (reset, checkout --, clean, restore, stash drop, force-push). Never kill processes by pattern; only signal an exact PID this tool started.
 - Minimize dependencies; justify each one in `docs/design.md`.

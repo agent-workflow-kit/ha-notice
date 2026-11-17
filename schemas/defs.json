@@ -69,7 +69,8 @@
         "upstream_error",
         "network_error",
         "outcome_unknown",
-        "wrong_host_response"
+        "wrong_host_response",
+        "unavailable"
       ],
       "description": "Exit 20 always has code refused with a reason; the reasons are not codes."
     },
@@ -84,7 +85,7 @@
     },
     "error_details": {
       "type": "object",
-      "description": "Fixed strings and numbers only, never an input value. By code or reason: config_invalid -> key (a key name, --config or a file path); reason invalid_payload or link_invalid -> pointer (may be the empty string); credential_invalid -> env; every code that came from a response (auth_required, host_rejected, rate_limited, upstream_error, wrong_host_response) -> http_status; host_rejected also hint; network_error -> tls, timeout.",
+      "description": "Fixed strings and numbers only, never an input value. By code or reason: config_invalid -> key (a key name, --config, home when the home directory lookup failed, or a file path); reason invalid_payload or link_invalid -> pointer (may be the empty string); credential_invalid -> env; unavailable -> phase (always input); every code that came from a response (auth_required, host_rejected, rate_limited, upstream_error, wrong_host_response) -> http_status; host_rejected also hint; network_error -> tls, timeout.",
       "properties": {
         "key": {
           "type": "string",
@@ -99,6 +100,10 @@
         "env": {
           "type": "string",
           "maxLength": 256
+        },
+        "phase": {
+          "const": "input",
+          "description": "unavailable only: the deadline passed while input was being read."
         },
         "http_status": {
           "type": "integer",
@@ -191,7 +196,8 @@
                   "upstream_error",
                   "network_error",
                   "outcome_unknown",
-                  "wrong_host_response"
+                  "wrong_host_response",
+                  "unavailable"
                 ]
               }
             },
@@ -322,6 +328,61 @@
               },
               "unknown_outcome": {
                 "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "retryable",
+              "unknown_outcome"
+            ],
+            "properties": {
+              "retryable": {
+                "const": true
+              },
+              "unknown_outcome": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "details"
+            ],
+            "properties": {
+              "details": {
+                "type": "object",
+                "required": [
+                  "phase"
+                ]
               }
             }
           }

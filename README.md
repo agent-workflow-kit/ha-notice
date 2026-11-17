@@ -62,11 +62,11 @@ Global flags: `--json`, `--config`, `--dry-run`, `--actor`, `--verbose`, `--quie
 
 ## Exit codes
 
-0 sent or dry run, 1 internal error, 2 usage or invalid config, 12 failed (with a `code`, including `credential_invalid` for a missing or malformed token; read `retryable` and `unknown_outcome`), 20 refused (`code: refused` with a `reason` such as `invalid_payload` or `empty_message`; only for payload problems), 22 nothing sent because the tool is disabled (a no-op, not an error). See [Exit codes](docs/interface.md#exit-codes).
+0 sent or dry run, 1 internal error, 2 usage or invalid config, 12 failed (with a `code`, including `credential_invalid` for a missing or malformed token and `unavailable` when the input did not arrive in time; read `retryable` and `unknown_outcome`), 20 refused (`code: refused` with a `reason` such as `invalid_payload` or `empty_message`; only for payload problems), 22 nothing sent because the tool is disabled (a no-op, not an error), 128+N a signal before the send started (nothing sent, no envelope). See [Exit codes](docs/interface.md#exit-codes).
 
 ## Config and environment
 
-- Config: `.config/ha-notice/config.yaml` under your home directory (taken from the password database; `HOME` and `XDG_CONFIG_HOME` are not read; `--config <path>` selects another file) plus `config.d/*.yaml` beside it; every key is documented in [config.example.yaml](config.example.yaml) and [Config](docs/interface.md#config).
+- Config: `.config/ha-notice/config.yaml` under your home directory (taken from the password database; `HOME` and `XDG_CONFIG_HOME` are not read, and a failed home lookup is exit 2 `config_invalid` with key `home`; `--config <path>` selects another file) plus `config.d/*.yaml` beside it; every key is documented in [config.example.yaml](config.example.yaml) and [Config](docs/interface.md#config).
 - Environment: only the variable named by `token_env` (the token) is read; the state directory is `.local/state/ha-notice` under the same home directory; there are no `HA_NOTICE_*` overrides ([Environment variables](docs/interface.md#environment-variables)).
 - Hooks: none.
 
@@ -76,6 +76,7 @@ Global flags: `--json`, `--config`, `--dry-run`, `--actor`, `--verbose`, `--quie
 - With `link_hosts` unset a producer can aim the tap target at any web address; the push does not show the URL.
 - A retry after an unknown outcome is safe only while no newer notification with the same key has been sent (a retry replaces the earlier notification).
 - The Android app may render a small HTML subset in the message (unverified); until checked, a producer may be able to style or mislabel text.
+- The tool ends within `timeout` plus 3 s; a caller that kills it waits at least `timeout` plus 10 s.
 - Calling from a script: see [Calling from automation](docs/interface.md#calling-from-automation).
 
 ## Dependencies

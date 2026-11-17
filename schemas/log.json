@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ha-notice/log.json",
   "title": "ha-notice log.jsonl record",
-  "description": "One record per send outcome that reaches step 3 (input) or later: sent, refused (exit 20), outcome_unknown (exit 12 whenever the envelope's unknown_outcome is true) or failed (any other exit 12). Not logged: exit 1, exit 2, exit 22 and dry runs. Never contains a title, message, link, base URL, service name or credential. A field that does not apply is null.",
+  "description": "One record per send outcome that reaches step 3 (input) or later: sent, refused (exit 20), outcome_unknown (exit 12 whenever the envelope's unknown_outcome is true, and exit 1 with unknown_outcome true after the gate reached writing) or failed (any other exit 12). Not logged: any other exit 1, exit 2, exit 22, a signal exit 128+N and dry runs. Never contains a title, message, link, base URL, service name or credential. A field that does not apply is null.",
   "type": "object",
   "properties": {
     "ts": {
@@ -22,15 +22,16 @@
         "failed",
         "outcome_unknown"
       ],
-      "description": "sent: exit 0; refused: exit 20; outcome_unknown: exit 12 with unknown_outcome true (outcome_unknown, upstream_error, or a wrong_host_response for a 2xx); failed: any other exit 12."
+      "description": "sent: exit 0; refused: exit 20; outcome_unknown: exit 12 with unknown_outcome true (outcome_unknown, upstream_error, or a wrong_host_response for a 2xx) or exit 1 with code internal (the request may have been sent); failed: any other exit 12."
     },
     "exit": {
       "enum": [
         0,
+        1,
         12,
         20
       ],
-      "description": "Only exits that reach step 3 or later are logged."
+      "description": "Only exits that reach step 3 or later are logged; exit 1 only when the request may have been sent (outcome_unknown, code internal)."
     },
     "code": {
       "oneOf": [
@@ -78,7 +79,7 @@
     "duration_ms": {
       "type": "integer",
       "minimum": 0,
-      "description": "From the start of input reading to just before the log write; never null."
+      "description": "From the start of input reading to the moment the result was fixed (just before it is printed); never null."
     },
     "http_status": {
       "type": [
@@ -207,7 +208,8 @@
               "credential_invalid",
               "rate_limited",
               "network_error",
-              "wrong_host_response"
+              "wrong_host_response",
+              "unavailable"
             ]
           },
           "reason": {
@@ -226,18 +228,53 @@
       },
       "then": {
         "properties": {
-          "exit": {
-            "const": 12
-          },
-          "code": {
-            "enum": [
-              "outcome_unknown",
-              "upstream_error",
-              "wrong_host_response"
-            ]
-          },
           "reason": {
             "type": "null"
+          }
+        },
+        "anyOf": [
+          {
+            "properties": {
+              "exit": {
+                "const": 12
+              },
+              "code": {
+                "enum": [
+                  "outcome_unknown",
+                  "upstream_error",
+                  "wrong_host_response"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "exit": {
+                "const": 1
+              },
+              "code": {
+                "const": "internal"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "exit": {
+            "const": 1
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "outcome_unknown"
+          },
+          "code": {
+            "const": "internal"
           }
         }
       }

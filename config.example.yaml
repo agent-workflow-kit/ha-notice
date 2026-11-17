@@ -1,5 +1,5 @@
 # ha-notice example config: every key with its default, except the two required keys.
-# Location: .config/ha-notice/config.yaml under your home directory (from the password database; HOME and
+# Location: .config/ha-notice/config.yaml under your home directory (from the password database, no fallback: a failed lookup exits 2; HOME and
 # XDG_CONFIG_HOME are not read), plus config.d/*.yaml beside it in lexical order; --config <path> reads another file (drop-ins are read next to it).
 # Drop-ins: maps merge. Files are at most 64 KiB; unknown keys are refused.
 # Precedence: flags, then config, then defaults. There are no environment overrides.
@@ -19,7 +19,7 @@ enabled: true
 # service: mobile_app_your_phone
 
 # Name of the environment variable holding a long-lived access token. Must match
-# ^HA_[A-Z0-9_]{1,60}$. The token itself never belongs in this file.
+# HA_[A-Z0-9_]{1,60} as a whole. The token itself never belongs in this file.
 token_env: HA_TOKEN
 
 # Allow an http:// base_url. The token then travels in cleartext. Warns on stderr on every send.
@@ -41,7 +41,7 @@ level_prefix:
   action: "ACTION:"
   error: "ERROR:"
 
-# data.group for every notification. Unset by default; ^[A-Za-z0-9_-]{1,64}$.
+# data.group for every notification. Unset by default; [A-Za-z0-9_-]{1,64} as a whole.
 # default_group: awkit
 
 # Message limit in characters (100 to 2000); the message is also limited to 2000 UTF-8 bytes.
