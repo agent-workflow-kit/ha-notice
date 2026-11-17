@@ -12,17 +12,17 @@
     "base_url": {
       "type": "string",
       "maxLength": 2048,
-      "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://(?:[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*|\\[[0-9A-Fa-f:.]+\\])(?::[0-9]{1,5})?(?:/(?!\\.{1,2}(?:/|$))[A-Za-z0-9._~-]+)*/*$",
+      "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://(?:[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*|\\[[0-9A-Fa-f:.]+\\])(?::[0-9]{1,5})?(?:/(?!\\.{1,2}(?:/|(?![\\s\\S])))[A-Za-z0-9._~-]+)*/*(?![\\s\\S])",
       "description": "https://host[:port][/prefix] (one trailing slash run allowed, removed by the tool); http:// only with allow_insecure_http: true. No userinfo, query, fragment, empty or dot segment; non-ASCII hosts as punycode. The port range 1 to 65535 is checked by the tool."
     },
     "service": {
       "type": "string",
-      "pattern": "^[a-z0-9_]{1,64}$",
+      "pattern": "^[a-z0-9_]{1,64}(?![\\s\\S])",
       "description": "The notify service name (the part after notify.), for example a mobile_app_ service."
     },
     "token_env": {
       "type": "string",
-      "pattern": "^HA_[A-Z0-9_]{1,60}$",
+      "pattern": "^HA_[A-Z0-9_]{1,60}(?![\\s\\S])",
       "default": "HA_TOKEN",
       "description": "Name of the environment variable holding the token; restricted to HA_ names."
     },
@@ -32,7 +32,7 @@
     },
     "ca_file": {
       "type": "string",
-      "pattern": "^/[^\\u0000]{0,4095}$",
+      "pattern": "^/[^\\u0000-\\u001f\\u007f]{0,4095}(?![\\s\\S])",
       "description": "Extra CA bundle, an absolute path (no ~). The tool checks that it is readable."
     },
     "link_hosts": {
@@ -41,31 +41,32 @@
       "maxItems": 32,
       "items": {
         "type": "string",
-        "pattern": "^[a-z0-9.-]{1,253}$"
+        "maxLength": 253,
+        "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?![\\s\\S])"
       },
-      "description": "Allowed link hosts (equal or dot-suffix match). Unset by default."
+      "description": "Allowed link hosts: at least two labels each, lowercase, no leading or trailing dot (equal or dot-suffix match). Unset by default."
     },
     "level_prefix": {
       "type": "object",
       "properties": {
         "info": {
           "type": "string",
-          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]{0,16}$",
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]{0,16}(?![\\s\\S])",
           "description": "One line, at most 16 characters; the tool also refuses a value the sanitizer would change."
         },
         "warn": {
           "type": "string",
-          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]{0,16}$",
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]{0,16}(?![\\s\\S])",
           "description": "One line, at most 16 characters; the tool also refuses a value the sanitizer would change."
         },
         "action": {
           "type": "string",
-          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]{0,16}$",
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]{0,16}(?![\\s\\S])",
           "description": "One line, at most 16 characters; the tool also refuses a value the sanitizer would change."
         },
         "error": {
           "type": "string",
-          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]{0,16}$",
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]{0,16}(?![\\s\\S])",
           "description": "One line, at most 16 characters; the tool also refuses a value the sanitizer would change."
         }
       },
@@ -79,7 +80,7 @@
     },
     "default_group": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9_ -]{1,64}$"
+      "pattern": "^[A-Za-z0-9_-]{1,64}(?![\\s\\S])"
     },
     "max_chars": {
       "type": "integer",
@@ -88,34 +89,14 @@
       "default": 1000
     },
     "timeout": {
-      "anyOf": [
-        {
-          "type": "number",
-          "minimum": 1,
-          "maximum": 120
-        },
-        {
-          "type": "string",
-          "pattern": "^[0-9]+(?:\\.[0-9]+)?(?:ms|s|m)?$"
-        }
-      ],
+      "$ref": "#/$defs/duration",
       "default": "10s",
-      "description": "The one deadline of a send, 1s to 120s. A number of seconds or a string <number>(ms|s|m) with no unit meaning seconds. The range of a string is checked by the tool."
+      "description": "The one deadline of a send, 1s to 120s (range checked by the tool)."
     },
     "connect_timeout": {
-      "anyOf": [
-        {
-          "type": "number",
-          "minimum": 1,
-          "maximum": 30
-        },
-        {
-          "type": "string",
-          "pattern": "^[0-9]+(?:\\.[0-9]+)?(?:ms|s|m)?$"
-        }
-      ],
+      "$ref": "#/$defs/duration",
       "default": "3s",
-      "description": "Limit for the connect phase, 1s to 30s; must not exceed timeout (checked by the tool). A number of seconds or a string <number>(ms|s|m) with no unit meaning seconds. The range of a string is checked by the tool."
+      "description": "Limit for the connect phase, 1s to 30s (range checked by the tool); never longer than the time that remains in the deadline."
     },
     "log": {
       "type": "boolean",
@@ -123,6 +104,21 @@
     }
   },
   "additionalProperties": false,
+  "$defs": {
+    "duration": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9]+(?:\\.[0-9]+)?(?:ms|s|m)?(?![\\s\\S])"
+        }
+      ],
+      "description": "A number of seconds or a string <number>(ms|s|m) with no unit meaning seconds. The range of each key is in its description and is checked by the tool."
+    }
+  },
   "allOf": [
     {
       "if": {

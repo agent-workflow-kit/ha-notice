@@ -1,20 +1,20 @@
 # ha-notice example config: every key with its default, except the two required keys.
-# Location: ~/.config/ha-notice/config.yaml (XDG_CONFIG_HOME respected when absolute), plus
-# config.d/*.yaml in lexical order; --config <path> reads another file (drop-ins are read next to it).
+# Location: .config/ha-notice/config.yaml under your home directory (from the password database; HOME and
+# XDG_CONFIG_HOME are not read), plus config.d/*.yaml beside it in lexical order; --config <path> reads another file (drop-ins are read next to it).
 # Drop-ins: maps merge. Files are at most 64 KiB; unknown keys are refused.
 # Precedence: flags, then config, then defaults. There are no environment overrides.
 # Schema: schemas/config.json. Invalid config exits 2 (config_invalid), naming the key.
-# Durations: a number of seconds, or a string like 10s, 1m, 500ms (no unit means seconds).
+# Durations: a number of seconds, or a string such as "10s" or "1m" (no unit means seconds).
 
 # false makes `send` print {"outcome": "disabled"} and exit 22 without reading input or the token.
 enabled: true
 
-# REQUIRED, no default (a copy of this file fails fast with exit 2 until both are set).
+# REQUIRED for send, no default: send exits 2 until both are set; a dry run needs neither.
 # Home Assistant base URL: https://host[:port][/prefix]. No userinfo, query or fragment; one
 # trailing slash run is removed. http:// only with allow_insecure_http: true.
 # base_url: https://homeassistant.example:8123
 
-# REQUIRED, no default. The notify service name, the part after "notify." (a mobile_app_ service
+# REQUIRED for send, no default. The notify service name, the part after "notify." (a mobile_app_ service
 # for a phone). Lowercase letters, digits and underscores, at most 64 characters.
 # service: mobile_app_your_phone
 
@@ -29,10 +29,10 @@ allow_insecure_http: false
 # Unset by default. There is no key that turns certificate checks off.
 # ca_file: /path/to/ca-bundle.pem
 
-# Restrict the host of `link` (list of 1 to 32 lowercase host names; an entry matches itself and
+# Restrict the host of `link` (list of 1 to 32 lowercase host names of at least two labels; an entry matches itself and
 # its subdomains). Unset by default. With it unset a producer can aim the tap target at any web
 # address; the push does not show the URL.
-# link_hosts: []
+# link_hosts: [example.org]
 
 # Title prefixes per level, one line of at most 16 characters each. Empty string: no prefix.
 level_prefix:
@@ -41,7 +41,7 @@ level_prefix:
   action: "ACTION:"
   error: "ERROR:"
 
-# data.group for every notification. Unset by default; ^[A-Za-z0-9_ -]{1,64}$.
+# data.group for every notification. Unset by default; ^[A-Za-z0-9_-]{1,64}$.
 # default_group: awkit
 
 # Message limit in characters (100 to 2000); the message is also limited to 2000 UTF-8 bytes.
@@ -51,8 +51,8 @@ max_chars: 1000
 # The one deadline for a whole send (input, connect, request, retries): 1s to 120s.
 timeout: 10s
 
-# Limit for the connect phase: 1s to 30s, and not more than timeout.
+# Limit for the connect phase: 1s to 30s; capped by the time left in the deadline.
 connect_timeout: 3s
 
-# false writes no ~/.local/state/ha-notice/log.jsonl.
+# false writes no log.jsonl in the state directory.
 log: true

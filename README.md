@@ -19,6 +19,8 @@ L1 (primitive). Works fully standalone; it does not need the `awkit` harness.
 
 ## Quick start
 
+After the [Set up Home Assistant](#set-up-home-assistant) steps (you need `base_url` and `service`):
+
 ```sh
 export HA_TOKEN=...   # a long-lived access token, see below
 ha-notice validate --probe     # offline checks plus one read-only call; never sends
@@ -31,8 +33,8 @@ ha-notice send --message "Preview only" --dry-run --json
 
 | Command | Purpose |
 |---|---|
-| `ha-notice send [--stdin-json \| --file <path>\|-] [--title <t>] [--message <m>] [--level <l>] [--link <url>] [--dedupe-key <k>]` | Send one notification. Text comes from stdin JSON, a file or flags; flags are for humans. |
-| `ha-notice validate [--probe] [--test-message]` | Check the config and the token variable; never prompts; `--probe` also checks the host and the token with one read-only call, `GET /api/` (output gains `probe: {api_ok}`); `--test-message` sends one marked test notification and adds a `test_message` check (look at your phone; automation must not call it). Exit 0 when every check passes, else the exit code of the failing check. |
+| `ha-notice send [--stdin-json \| --file <path>\|-] [--title <t>] [--message <m>] [--level <l>] [--link <url>] [--dedupe-key <k>] [--decision-id <id>]` | Send one notification. Text comes from stdin JSON, a file or flags; flags are for humans. |
+| `ha-notice validate [--probe] [--test-message]` | Check the config and the token variable; never prompts; `--probe` also checks the host and the token with one read-only call, `GET /api/` (output gains `probe: {api_ok}`); `--test-message` sends one marked test notification and adds a `test_message` check (look at your phone; automation must not call it). Plain `validate` ignores `enabled` except to report it, so a disabled tool still reports its faults; `--probe` and `--test-message` on a disabled tool make no call and exit 22. Exit 0 when every check passes, else the exit code of the failing check. |
 
 Global flags: `--json`, `--config`, `--dry-run`, `--actor`, `--verbose`, `--quiet`, `--version` ([Global flags](docs/interface.md#global-flags)).
 
@@ -42,14 +44,12 @@ Global flags: `--json`, `--config`, `--dry-run`, `--actor`, `--verbose`, `--quie
 2. Put the token in an environment variable whose name you set as `token_env` in the config (default `HA_TOKEN`). For cron, keep it in a file that only you can read and source it in the cron line:
 
    ```sh
-   umask 077
-   mkdir -p ~/.config/ha-notice
-   echo 'export HA_TOKEN=...' >> ~/.config/ha-notice/env
-   # crontab (absolute binary path, from `command -v ha-notice`):
-   # * * * * * set -a; . ~/.config/ha-notice/env; set +a; /home/you/.local/bin/ha-notice send --stdin-json --json --actor auto:cron < msg.json
+   ( umask 077; mkdir -p ~/.config/ha-notice; echo 'export HA_TOKEN=...' >> ~/.config/ha-notice/env )
+   # crontab (absolute binary path, from `command -v ha-notice`; the schedule is a placeholder):
+   # */15 * * * * set -a; . ~/.config/ha-notice/env; set +a; /home/you/.local/bin/ha-notice send --stdin-json --json --actor auto:cron < msg.json
    ```
 
-   The `>>` never truncates an existing file. The variable name must start with `HA_` (`token_env` is restricted to that); a token kept under another name is aliased to `HA_TOKEN` in this env file.
+   The `>>` never truncates an existing file, so a second run adds a second line and the last one wins. Cron runs the tool with `--config <path>` when your config is not in the default place. The variable name must start with `HA_` (`token_env` is restricted to that); a token kept under another name is aliased to `HA_TOKEN` in this env file.
 
 3. Find the service name: in Home Assistant, Developer tools, Actions (or Services), search for `notify.`. Your phone is a service named `mobile_app_<device>`; the config key `service` is the part after `notify.`.
 4. Copy [config.example.yaml](config.example.yaml) to `~/.config/ha-notice/config.yaml` and set `base_url` and `service` (without them a send exits 2).
@@ -66,19 +66,21 @@ Global flags: `--json`, `--config`, `--dry-run`, `--actor`, `--verbose`, `--quie
 
 ## Config and environment
 
-- Config: `~/.config/ha-notice/config.yaml` plus `config.d/*.yaml`; every key is documented in [config.example.yaml](config.example.yaml) and [Config](docs/interface.md#config).
-- Environment: only the variable named by `token_env` (the token) and the XDG and `HOME` paths; there are no `HA_NOTICE_*` overrides ([Environment variables](docs/interface.md#environment-variables)).
+- Config: `.config/ha-notice/config.yaml` under your home directory (taken from the password database; `HOME` and `XDG_CONFIG_HOME` are not read; `--config <path>` selects another file) plus `config.d/*.yaml` beside it; every key is documented in [config.example.yaml](config.example.yaml) and [Config](docs/interface.md#config).
+- Environment: only the variable named by `token_env` (the token) is read; the state directory is `.local/state/ha-notice` under the same home directory; there are no `HA_NOTICE_*` overrides ([Environment variables](docs/interface.md#environment-variables)).
 - Hooks: none.
 
 ## Limits
 
 - Proxy variables and `SSL_CERT_FILE` are ignored; a private CA goes in `ca_file`, and there is no switch that turns certificate checks off.
 - With `link_hosts` unset a producer can aim the tap target at any web address; the push does not show the URL.
+- A retry after an unknown outcome is safe only while no newer notification with the same key has been sent (a retry replaces the earlier notification).
+- The Android app may render a small HTML subset in the message (unverified); until checked, a producer may be able to style or mislabel text.
 - Calling from a script: see [Calling from automation](docs/interface.md#calling-from-automation).
 
 ## Dependencies
 
-The Python standard library, Pydantic for config validation and PyYAML (`safe_load`) for the config file; ha-notice calls no other tool.
+The Python standard library, Pydantic for config validation and PyYAML (with a strict loader) for the config file; ha-notice calls no other tool.
 
 ## Requirements and install
 

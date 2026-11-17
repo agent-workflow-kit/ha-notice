@@ -18,12 +18,12 @@
     },
     "ts": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})$",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])",
       "description": "RFC 3339."
     },
     "sha16": {
       "type": "string",
-      "pattern": "^[0-9a-f]{16}$",
+      "pattern": "^[0-9a-f]{16}(?![\\s\\S])",
       "description": "First 16 hex characters of a SHA-256."
     },
     "dedupe_key": {
@@ -34,7 +34,7 @@
     },
     "actor": {
       "type": "string",
-      "pattern": "^(human|auto):[A-Za-z0-9._@/-]{1,64}$",
+      "pattern": "^(human|auto):[A-Za-z0-9._@/-]{1,64}(?![\\s\\S])",
       "description": "human:<user> or auto:<name>. Advisory."
     },
     "actor_source": {
@@ -84,17 +84,17 @@
     },
     "error_details": {
       "type": "object",
-      "x-untrusted": true,
-      "description": "Untrusted: may hold payload field names or host text. By code or reason: config_invalid -> key; reason invalid_payload -> pointer (may be the empty string); credential_invalid -> env; auth_required -> http_status; host_rejected -> http_status, hint; network_error -> tls, timeout.",
+      "description": "Fixed strings and numbers only, never an input value. By code or reason: config_invalid -> key (a key name, --config or a file path); reason invalid_payload or link_invalid -> pointer (may be the empty string); credential_invalid -> env; every code that came from a response (auth_required, host_rejected, rate_limited, upstream_error, wrong_host_response) -> http_status; host_rejected also hint; network_error -> tls, timeout.",
       "properties": {
         "key": {
           "type": "string",
-          "maxLength": 256
+          "maxLength": 4096
         },
         "pointer": {
           "type": "string",
-          "maxLength": 512,
-          "description": "JSON pointer into the input."
+          "maxLength": 66,
+          "pattern": "^(?:|/(?:[A-Za-z0-9_-]{1,64}|\\?))(?![\\s\\S])",
+          "description": "JSON pointer into the input: empty, /<field> or /? for a field name outside [A-Za-z0-9_-]{1,64}."
         },
         "env": {
           "type": "string",
@@ -126,9 +126,8 @@
         },
         "message": {
           "type": "string",
-          "x-untrusted": true,
           "maxLength": 2048,
-          "description": "Untrusted: may quote host or input text. Never contains the token."
+          "description": "A fixed string of the tool; never a response body, header, exception text, input value or the token."
         },
         "reason": {
           "oneOf": [
@@ -496,6 +495,31 @@
             "properties": {
               "reason": {
                 "const": "invalid_payload"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "required": [
+              "details"
+            ],
+            "properties": {
+              "details": {
+                "type": "object",
+                "required": [
+                  "pointer"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "link_invalid"
               }
             },
             "required": [
