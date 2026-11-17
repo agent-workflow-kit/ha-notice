@@ -2,26 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ha-notice/cli/validate.json",
   "title": "validate output",
-  "description": "Printed with --json when the config loads. ok is true when every check passes (exit 0); otherwise ok is false and the exit is the exit code of the first failing check (20 refused with a reason, 12 for tool or host problems). When the config cannot load, the output is the error envelope with exit 2. probe is present only with --probe; a check named test_message is present only with --test-message.",
+  "description": "Printed with --json when the config loads. enabled is the configured value. Checks run in the order config, credential, probe, test_message; a failed check ends the run and later checks are omitted, so ok is true only when every printed check is ok. Exit 0 when ok, else the exit code of the failing check (config 2; credential, probe, test_message 12); exit 22 when enabled is false (then only config and credential run). When the config cannot load, the output is the error envelope with exit 2. probe is present only with --probe; the probe and test_message checks only with --probe and --test-message.",
   "type": "object",
   "properties": {
     "ok": {
       "type": "boolean"
     },
+    "enabled": {
+      "type": "boolean"
+    },
     "probe": {
       "type": "object",
-      "description": "Present only with --probe. service_found is false when the API call failed.",
+      "description": "Present only with --probe (GET /api/).",
       "properties": {
         "api_ok": {
-          "type": "boolean"
-        },
-        "service_found": {
           "type": "boolean"
         }
       },
       "required": [
-        "api_ok",
-        "service_found"
+        "api_ok"
       ],
       "additionalProperties": false
     },
@@ -31,8 +30,12 @@
         "type": "object",
         "properties": {
           "name": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+            "enum": [
+              "config",
+              "credential",
+              "probe",
+              "test_message"
+            ]
           },
           "ok": {
             "type": "boolean"
@@ -55,7 +58,78 @@
   },
   "required": [
     "ok",
+    "enabled",
     "checks"
   ],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": false
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "probe"
+          ]
+        },
+        "properties": {
+          "checks": {
+            "items": {
+              "properties": {
+                "name": {
+                  "enum": [
+                    "config",
+                    "credential"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checks": {
+            "contains": {
+              "properties": {
+                "ok": {
+                  "const": false
+                }
+              },
+              "required": [
+                "ok"
+              ]
+            }
+          }
+        },
+        "required": [
+          "checks"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": false
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        }
+      }
+    }
+  ]
 }

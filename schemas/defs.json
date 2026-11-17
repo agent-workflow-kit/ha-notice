@@ -28,12 +28,13 @@
     },
     "dedupe_key": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9._:@/-]{1,128}$",
-      "description": "Grammar of --dedupe-key."
+      "minLength": 1,
+      "maxLength": 1024,
+      "description": "--dedupe-key: any non-empty string of at most 1024 characters; only hashed."
     },
     "actor": {
       "type": "string",
-      "pattern": "^(human|auto):[A-Za-z0-9._@-]{1,64}$",
+      "pattern": "^(human|auto):[A-Za-z0-9._@/-]{1,64}$",
       "description": "human:<user> or auto:<name>. Advisory."
     },
     "actor_source": {
@@ -63,13 +64,12 @@
         "refused",
         "host_rejected",
         "auth_required",
-        "permission_denied",
+        "credential_invalid",
         "rate_limited",
         "upstream_error",
         "network_error",
         "outcome_unknown",
-        "wrong_host_response",
-        "state_unsafe"
+        "wrong_host_response"
       ],
       "description": "Exit 20 always has code refused with a reason; the reasons are not codes."
     },
@@ -79,14 +79,13 @@
         "empty_message",
         "command_keyword",
         "link_invalid",
-        "link_scheme",
-        "credential_missing"
+        "link_scheme"
       ]
     },
     "error_details": {
       "type": "object",
       "x-untrusted": true,
-      "description": "Untrusted: may hold payload field names or host text. By code or reason: code config_invalid -> key; reason invalid_payload -> pointer; reason credential_missing -> env; code host_rejected -> http_status, hint, service; code network_error -> tls.",
+      "description": "Untrusted: may hold payload field names or host text. By code or reason: config_invalid -> key; reason invalid_payload -> pointer (may be the empty string); credential_invalid -> env; auth_required -> http_status; host_rejected -> http_status, hint; network_error -> tls, timeout.",
       "properties": {
         "key": {
           "type": "string",
@@ -110,11 +109,10 @@
           "type": "string",
           "maxLength": 512
         },
-        "service": {
-          "type": "string",
-          "maxLength": 64
-        },
         "tls": {
+          "type": "boolean"
+        },
+        "timeout": {
           "type": "boolean"
         }
       },
@@ -158,21 +156,22 @@
             "boolean",
             "null"
           ],
-          "description": "A boolean on exit 12, null elsewhere."
+          "description": "A boolean on exit 12 and exit 1 (false), null on exit 2 and 20. Sending the same notification again is safe."
         },
         "retry_after_s": {
           "type": [
             "number",
             "null"
           ],
-          "minimum": 0
+          "minimum": 0,
+          "description": "Set only for rate_limited."
         },
         "unknown_outcome": {
           "type": [
             "boolean",
             "null"
           ],
-          "description": "A boolean on exit 12 (true when the request may have been delivered), null elsewhere."
+          "description": "A boolean on exit 12 and exit 1 (true when the request may have been delivered), null on exit 2 and 20."
         }
       },
       "required": [
@@ -188,13 +187,12 @@
                 "enum": [
                   "host_rejected",
                   "auth_required",
-                  "permission_denied",
+                  "credential_invalid",
                   "rate_limited",
                   "upstream_error",
                   "network_error",
                   "outcome_unknown",
-                  "wrong_host_response",
-                  "state_unsafe"
+                  "wrong_host_response"
                 ]
               }
             },
@@ -215,8 +213,52 @@
                 "type": "boolean"
               }
             }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "internal"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
           },
-          "else": {
+          "then": {
+            "required": [
+              "retryable",
+              "unknown_outcome"
+            ],
+            "properties": {
+              "retryable": {
+                "const": false
+              },
+              "unknown_outcome": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "usage",
+                  "config_invalid",
+                  "refused"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
             "properties": {
               "retryable": {
                 "type": "null"
@@ -232,10 +274,9 @@
             "properties": {
               "code": {
                 "enum": [
-                  "state_unsafe",
                   "host_rejected",
                   "auth_required",
-                  "permission_denied"
+                  "credential_invalid"
                 ]
               }
             },
@@ -263,7 +304,35 @@
             "properties": {
               "code": {
                 "enum": [
-                  "rate_limited",
+                  "rate_limited"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "retryable",
+              "unknown_outcome"
+            ],
+            "properties": {
+              "retryable": {
+                "const": true
+              },
+              "unknown_outcome": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "outcome_unknown",
                   "upstream_error"
                 ]
               }
@@ -273,44 +342,12 @@
             ]
           },
           "then": {
-            "required": [
-              "retryable",
-              "unknown_outcome"
-            ],
             "properties": {
-              "retryable": {
-                "const": true
-              },
-              "unknown_outcome": {
-                "const": false
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "code": {
-                "enum": [
-                  "outcome_unknown"
-                ]
-              }
-            },
-            "required": [
-              "code"
-            ]
-          },
-          "then": {
-            "required": [
-              "retryable",
-              "unknown_outcome"
-            ],
-            "properties": {
-              "retryable": {
-                "const": true
-              },
               "unknown_outcome": {
                 "const": true
+              },
+              "retryable": {
+                "type": "boolean"
               }
             }
           }
@@ -332,6 +369,9 @@
             "properties": {
               "retryable": {
                 "const": false
+              },
+              "unknown_outcome": {
+                "type": "boolean"
               }
             }
           }
@@ -353,6 +393,69 @@
             "properties": {
               "unknown_outcome": {
                 "const": false
+              }
+            },
+            "if": {
+              "properties": {
+                "details": {
+                  "type": "object",
+                  "required": [
+                    "tls"
+                  ],
+                  "properties": {
+                    "tls": {
+                      "const": true
+                    }
+                  }
+                }
+              },
+              "required": [
+                "details"
+              ]
+            },
+            "then": {
+              "properties": {
+                "retryable": {
+                  "const": false
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "retryable": {
+                  "const": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "rate_limited"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "retry_after_s"
+            ],
+            "properties": {
+              "retry_after_s": {
+                "type": "number"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "retry_after_s": {
+                "type": "null"
               }
             }
           }
@@ -416,12 +519,14 @@
         {
           "if": {
             "properties": {
-              "reason": {
-                "const": "credential_missing"
+              "code": {
+                "enum": [
+                  "credential_invalid"
+                ]
               }
             },
             "required": [
-              "reason"
+              "code"
             ]
           },
           "then": {
@@ -433,6 +538,34 @@
                 "type": "object",
                 "required": [
                   "env"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "auth_required",
+                  "host_rejected"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "details"
+            ],
+            "properties": {
+              "details": {
+                "type": "object",
+                "required": [
+                  "http_status"
                 ]
               }
             }

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ha-notice/notification.json",
   "title": "ha-notice notification (input)",
-  "description": "The JSON object read by send --stdin-json or --file. Unknown fields exit 20 invalid_payload. Sanitizing, the cut of a title to 256 characters after sanitizing, the empty-message check and the command-keyword check are applied by the tool and are not expressible here.",
+  "description": "The JSON object read by send --stdin-json or --file. Unknown fields exit 20 invalid_payload. Sanitizing, the cut of a title to 256 characters after sanitizing, the empty-message check (message has no minLength here), the command-keyword check and the exact link rule are applied by the tool and are not expressible here.",
   "type": "object",
   "properties": {
     "title": {
@@ -13,7 +13,6 @@
     },
     "message": {
       "type": "string",
-      "minLength": 1,
       "maxLength": 100000,
       "x-untrusted": true,
       "description": "Untrusted. At most 100000 characters of input; must not be empty after sanitizing and must not be a command message."
@@ -24,9 +23,9 @@
     },
     "link": {
       "type": "string",
-      "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#@\\u0000-\\u001f\\u007f]+(?:[/?#][^\\s\\u0000-\\u001f\\u007f]*)?$",
+      "pattern": "^[\\u0021-\\u007e]{1,1024}$(?![\\s\\S])",
       "maxLength": 1024,
-      "description": "Syntactic gate only: http or https URL, no whitespace or control characters, no userinfo, at most 1024 characters. The tool names link_invalid or link_scheme."
+      "description": "Coarse gate only: 1 to 1024 printable ASCII characters (U+0021 to U+007E). The tool is authoritative: scheme (case-insensitive http or https), host, port and the reasons link_invalid and link_scheme."
     }
   },
   "required": [

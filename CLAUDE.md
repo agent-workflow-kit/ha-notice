@@ -9,7 +9,7 @@ ha-notice is an awkit L1 primitive: send one notification through the Home Assis
 1. `../awkit-docs/architecture.md`: this tool's §5.1 entry and its §20 entry (constraints and open topics), plus the cross-cutting sections listed in `docs/design.md`.
 2. `../awkit-docs/design-guide.md`: the conventions every awkit tool follows.
 3. `docs/interface.md`: the single normative source for this tool's rules; it wins over every other document.
-4. `docs/design.md`: decisions, modules and test strategy; `docs/plan.md`: the staged plan, once it exists.
+4. `docs/design.md`: decisions, modules and test strategy; `docs/plan.md`: the staged plan.
 
 ## Rules
 
@@ -21,7 +21,8 @@ ha-notice is an awkit L1 primitive: send one notification through the Home Assis
 - Run `make verify` before every commit.
 - All subprocess and HTTP calls go through `src/ha_notice/gateway.py`.
 - Untrusted text travels only in files or stdin, never argv or env.
-- The token is read only from the variable named by `token_env` and never appears in argv, URLs, logs, output or errors.
+- The token is read only from the variable named by `token_env` (it must start with `HA_`) and never appears in argv, URLs, logs, output or errors. There are no `HA_NOTICE_*` environment overrides.
+- HTTP uses `http.client` with its own TLS context: no proxies, no redirects, no `urllib`, `SSL_CERT_FILE` ignored.
 - Never run destructive git commands (reset, checkout --, clean, restore, stash drop, force-push). Never kill processes by pattern; only signal an exact PID this tool started.
 - Minimize dependencies; justify each one in `docs/design.md`.
 
