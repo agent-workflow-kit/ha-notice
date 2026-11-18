@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -159,9 +160,15 @@ def test_validate_accepts_its_flags(run: Any, monkeypatch: pytest.MonkeyPatch) -
         ["send", "--message=a", "--verbose", "--quiet"],
         ["send", "--stdin-json=x"],
         ["--config="],
-        ["--config=", "send", "--message=a"],
+        ["--actor="],
+        ["send", "--message=a", "--actor="],
         ["send", "--message=a", "--dedupe-key="],
         ["--"],
+        ["--", "send", "--message=a"],
+        ["send", "-hx"],
+        ["send", "-x"],
+        ["-hx"],
+        ["send", "--message=a", "-v"],
         ["send", "--", "--message=a"],
         ["send", "--message=a", "--"],
         ["send", "extra", "--message=a"],
@@ -224,6 +231,56 @@ def test_a_level_outside_the_four_is_not_a_usage_error(
 # --- flag combinations (step 1) -----------------------------------------------------------
 
 
+def test_stdin_json_with_file_dash_is_one_source_and_accepted(
+    run: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen = _spy_invocations(monkeypatch)
+    run(["send", "--stdin-json", "--file=-"], FakeGateway())
+    assert seen and seen[0].send is not None and seen[0].send.file == "-"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--config=", "send", "--message=a"],
+        ["send", "--message=a", "--config", ""],
+        ["send", "--file="],
+        ["send", "--file", ""],
+    ],
+)
+def test_empty_config_and_file_pass_through_to_the_handler(
+    run: Any, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+) -> None:
+    seen = _spy_invocations(monkeypatch)
+    run(argv, FakeGateway())
+    assert seen
+    assert seen[0].config == "" or (seen[0].send is not None and seen[0].send.file == "")
+
+
+def test_dash_h_alone_is_still_help(run: Any) -> None:
+    code, out, _ = run(["send", "-h"])
+    assert code == 0 and out.startswith("usage: ")
+
+
+def test_a_stream_that_is_none_is_skipped() -> None:
+    cli.write_text(None, "x")  # type: ignore[arg-type]
+
+
+def test_a_stream_whose_buffer_raises_is_tolerated() -> None:
+    class Odd:
+        @property
+        def buffer(self) -> Any:
+            raise RuntimeError("boom")
+
+        def write(self, text: str) -> int:
+            raise OSError
+
+        def flush(self) -> None:
+            raise OSError
+
+    cli.write_text(Odd(), "x")  # type: ignore[arg-type]
+
+
 def _tty() -> FakeGateway:
     return FakeGateway(tty_fds={0})
 
@@ -237,7 +294,6 @@ def _tty() -> FakeGateway:
         ["send", "--file=x.json", "--link=https://a.example/"],
         ["send", "--file=x.json", "--message=a"],
         ["send", "--stdin-json", "--file=x.json"],
-        ["send", "--stdin-json", "--file=-"],
         ["send", "--title=a"],
         ["send", "--level=info"],
         ["send", "--link=https://a.example/"],
@@ -672,3 +728,77 @@ def test_real_process_usage_error_with_json(tmp_path: Path) -> None:
     assert proc.returncode == 2
     assert schema_errors("cli/error", json.loads(proc.stdout)) == []
     assert proc.stderr.startswith(b"usage: ") and list(home.iterdir()) == []
+
+
+# --- real processes with broken standard streams -------------------------------------------
+
+
+def _env(tmp_path: Path) -> dict[str, str]:
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    return {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(home / "cfg"),
+        "XDG_STATE_HOME": str(home / "state"),
+        "LC_ALL": "C",
+    }
+
+
+def _closed_fd(tmp_path: Path, args: list[str], fd: int) -> subprocess.CompletedProcess[bytes]:
+    """Run the tool with one standard fd closed in the child (``N>&-``)."""
+    cmd = " ".join(shlex.quote(a) for a in [sys.executable, "-m", "ha_notice", *args])
+    return subprocess.run(
+        ["/bin/sh", "-c", f"exec {cmd} {fd}>&-"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL if fd != 1 else None,
+        stderr=subprocess.DEVNULL if fd != 2 else None,
+        capture_output=False,
+        timeout=60,
+        check=False,
+        env=_env(tmp_path),
+    )
+
+
+def test_real_process_closed_stdout_version_exits_0(tmp_path: Path) -> None:
+    assert _closed_fd(tmp_path, ["--version"], 1).returncode == 0
+
+
+def test_real_process_closed_stdout_usage_error_with_json_exits_2(tmp_path: Path) -> None:
+    assert _closed_fd(tmp_path, ["--json", "bogus"], 1).returncode == 2
+
+
+def test_real_process_closed_stderr_usage_error_exits_2(tmp_path: Path) -> None:
+    assert _closed_fd(tmp_path, ["bogus"], 2).returncode == 2
+
+
+def test_real_process_stdout_to_dev_full_keeps_the_exit_code(tmp_path: Path) -> None:
+    with open("/dev/full", "wb") as full:
+        proc = subprocess.run(
+            [sys.executable, "-m", "ha_notice", "--version"],
+            stdin=subprocess.DEVNULL,
+            stdout=full,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+            check=False,
+            env=_env(tmp_path),
+        )
+    assert proc.returncode == 0
+
+
+def test_real_process_closed_pipe_keeps_the_exit_code(tmp_path: Path) -> None:
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "ha_notice", "--json", "bogus"],
+            stdin=subprocess.DEVNULL,
+            stdout=write_end,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+            check=False,
+            env=_env(tmp_path),
+        )
+    finally:
+        os.close(write_end)
+    assert proc.returncode == 2

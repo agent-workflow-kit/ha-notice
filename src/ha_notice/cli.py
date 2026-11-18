@@ -1,11 +1,14 @@
 """Command-line entry point for ha-notice: parsing, step 1 checks, dispatch and error output.
 
-Parsing rules (docs/interface.md, Global flags and Output):
+Parsing rules (docs/interface.md, Global flags, Input and Output):
 
 - Flags are exact: no abbreviations, on the main parser and on every subparser.
 - ``--flag=value`` and ``--flag value`` are the same, but a separate value that starts with ``-``
   (other than a lone ``-``) is refused, whatever argparse would make of it: such a value must use
-  the ``=`` form. ``--`` is refused: there are no positional arguments.
+  the ``=`` form. ``--`` and single-dash tokens other than ``-h`` are refused: there are no
+  positional arguments and no short options. ``-h`` and ``--help`` work before or after the
+  subcommand. An empty ``--actor`` or ``--dedupe-key`` is refused; an empty ``--config`` or
+  ``--file`` is passed through (later steps judge it).
 - Global flags are accepted before and after the subcommand; a value flag given twice (also once
   on each side) is refused. Repeating a boolean flag is harmless. ``--verbose`` with ``--quiet``
   is refused.
@@ -21,7 +24,7 @@ import os
 import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, TextIO
 
 from ha_notice import __version__
@@ -67,12 +70,28 @@ class _ParserExit(Exception):
 # --- output ---------------------------------------------------------------------------------
 
 
-def write_text(stream: TextIO, text: str) -> None:
+def _discard_pending(stream: Any) -> None:
+    """Point the stream's descriptor at the null device after a failed write, so that the data
+    still buffered cannot fail again (and change the exit code) at interpreter shutdown."""
+    try:
+        fd = stream.fileno()
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, fd)
+        finally:
+            os.close(devnull)
+    except Exception:  # noqa: BLE001 - best effort, never changes the exit code
+        pass
+
+
+def write_text(stream: TextIO | None, text: str) -> None:
     """Write ``text`` as UTF-8 with errors replaced, never through the locale; ignore failures.
 
-    A failure to write (``BrokenPipeError`` or any ``OSError``, a closed stream) never changes the
-    exit code. TODO(#7): the exact flush and ordering rules of the output step.
+    A failure to write (``BrokenPipeError`` or any ``OSError``, a closed stream, a missing stream)
+    never changes the exit code. TODO(#7): the exact flush and ordering rules of the output step.
     """
+    if stream is None:
+        return
     data = text.encode("utf-8", errors="replace")
     try:
         buffer = getattr(stream, "buffer", None)
@@ -83,8 +102,8 @@ def write_text(stream: TextIO, text: str) -> None:
         else:
             stream.write(data.decode("utf-8"))
             stream.flush()
-    except (OSError, ValueError):
-        pass
+    except Exception:  # noqa: BLE001 - output failures are ignored (OSError, ValueError, ...)
+        _discard_pending(stream)
 
 
 def dumps(obj: Any) -> str:
@@ -143,7 +162,7 @@ class _Parser(argparse.ArgumentParser):
 
 
 class _Once(argparse.Action):
-    """A value flag that may be given once, and not empty."""
+    """A value flag that may be given once (an empty value is accepted)."""
 
     def __call__(
         self,
@@ -158,6 +177,8 @@ class _Once(argparse.Action):
 
 
 class _OnceNonEmpty(_Once):
+    """Once, and not empty (--actor, --dedupe-key)."""
+
     def __call__(
         self,
         parser: argparse.ArgumentParser,
@@ -199,7 +220,7 @@ def _add_global_flags(parser: argparse.ArgumentParser, prefix: str) -> None:
     parser.add_argument(
         "--config",
         dest=f"{prefix}_config",
-        action=_OnceNonEmpty,
+        action=_Once,
         metavar="PATH",
         help="config file instead of the default",
     )
@@ -242,7 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
     send.add_argument("--stdin-json", action="store_true", help="read the notification from stdin")
     send.add_argument(
         "--file",
-        action=_OnceNonEmpty,
+        action=_Once,
         metavar="PATH",
         help="read the notification from a file (- is stdin)",
     )
@@ -305,7 +326,6 @@ class Invocation:
     gateway: Gateway
     send: SendArgs | None = None
     validate: ValidateArgs | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
 
 
 def resolve_actor(flag: str | None, gateway: Gateway) -> tuple[str, str]:
@@ -328,6 +348,8 @@ def _precheck(argv: Sequence[str]) -> None:
     for i, tok in enumerate(argv):
         if tok == "--":
             raise UsageError("unexpected --")
+        if tok.startswith("-") and not tok.startswith("--") and tok not in ("-", "-h"):
+            raise UsageError("single-dash options are not accepted")
         if tok in VALUE_FLAGS and i + 1 < len(argv):
             nxt = argv[i + 1]
             if nxt.startswith("-") and nxt != "-":
@@ -346,7 +368,7 @@ def _check_send(args: SendArgs, stdin_is_tty: Callable[[], bool]) -> None:
     has_json_source = args.stdin_json or args.file is not None
     if has_json_source and any(v is not None for v in text_flags):
         raise UsageError("a JSON source cannot be combined with text flags")
-    if args.stdin_json and args.file is not None:
+    if args.stdin_json and args.file is not None and args.file != "-":
         raise UsageError("--stdin-json cannot be combined with --file")
     if args.dedupe_key is not None:
         if len(args.dedupe_key) > DEDUPE_KEY_MAX:
@@ -435,7 +457,9 @@ def _not_implemented(inv: Invocation) -> int:
 
 
 def _send(inv: Invocation) -> int:
-    # TODO(#27): the send flow (config, input, render, request, output, log).
+    # TODO(#27): the send flow (config, input, render, request, output, log). #27 must treat an
+    # empty or nonexistent --config as config_invalid (details.key "--config") and an empty or
+    # nonexistent --file as exit 2 usage at step 3 (after the disabled check).
     return _not_implemented(inv)
 
 
@@ -458,6 +482,8 @@ def main(
     args = sys.argv[1:] if argv is None else list(argv)
     environment = dict(os.environ) if env is None else env
     gw = RealGateway() if gateway is None else gateway
+    # TODO(#7): unexpected exceptions (also from parse: gateway.isatty, login_name) must be caught
+    # here as exit 1 internal with the envelope; only _ParserExit and UsageError are handled now.
     try:
         inv = parse(args, environment, gw)
     except _ParserExit as done:
