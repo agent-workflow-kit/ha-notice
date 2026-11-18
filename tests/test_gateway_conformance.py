@@ -7,10 +7,12 @@ outcome, including the same exception classes.
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import inspect
 import socket
 import threading
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -149,26 +151,36 @@ class LoopbackServer:
         self.sock.close()
 
 
-def _free_closed_port() -> int:
+@contextlib.contextmanager
+def closed_port() -> Iterator[int]:
+    """A loopback port that refuses connections, with no race: it stays bound, never listens."""
     s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port: int = s.getsockname()[1]
-    s.close()
-    return port
+    try:
+        s.bind(("127.0.0.1", 0))
+        yield s.getsockname()[1]
+    finally:
+        s.close()
 
 
-SCENARIOS = ["ok", "refused", "drop_after_request", "not_http"]
+SCENARIOS = ["ok", "refused", "drop_after_request", "not_http", "short_body"]
+SHORT_BODY = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nabcd"
 
 
 @pytest.fixture(params=["real", "fake"])
 def make_backend(request: pytest.FixtureRequest) -> Iterator[Any]:
     servers: list[LoopbackServer] = []
+    stack = contextlib.ExitStack()
 
     def make(scenario: str) -> Backend:
         if request.param == "real":
-            reply = {"ok": OK_RESPONSE, "drop_after_request": None, "not_http": b"garbage\r\n\r\n"}
+            reply = {
+                "ok": OK_RESPONSE,
+                "drop_after_request": None,
+                "not_http": b"garbage\r\n\r\n",
+                "short_body": SHORT_BODY,
+            }
             if scenario == "refused":
-                port, received = _free_closed_port(), []
+                port, received = stack.enter_context(closed_port()), []
             else:
                 server = LoopbackServer(reply[scenario])
                 servers.append(server)
@@ -181,6 +193,7 @@ def make_backend(request: pytest.FixtureRequest) -> Iterator[Any]:
                 response_error=http.client.RemoteDisconnected("closed")
             ),
             "not_http": ConnectionScript(response_error=http.client.BadStatusLine("garbage")),
+            "short_body": ConnectionScript(body=b"abcd", declared_length=100),
         }[scenario]
         fake = FakeGateway()
         fake.scripts.append(script)
@@ -191,6 +204,7 @@ def make_backend(request: pytest.FixtureRequest) -> Iterator[Any]:
     finally:
         for s in servers:
             s.close()
+        stack.close()
 
 
 def _spec(port: int) -> ConnectSpec:
@@ -222,6 +236,7 @@ EXPECTED = {
     "refused": ("connect:ConnectionRefusedError", None),
     "drop_after_request": ("response:RemoteDisconnected", None),
     "not_http": ("response:BadStatusLine", None),
+    "short_body": ("response:IncompleteRead", None),
 }
 
 
@@ -325,9 +340,13 @@ def test_real_gateway_does_not_follow_redirects() -> None:
 
 def test_real_connection_refused_is_prompt() -> None:
     gw_ = RealGateway()
-    conn = gw_.connect(_spec(_free_closed_port()))
-    with pytest.raises(ConnectionRefusedError):
-        conn.connect()
+    with closed_port() as port:
+        conn = gw_.connect(_spec(port))
+        try:
+            with pytest.raises(ConnectionRefusedError):
+                conn.connect()
+        finally:
+            conn.close()
 
 
 def test_real_unresolvable_name_raises_gaierror() -> None:
@@ -356,3 +375,251 @@ def test_https_to_a_plain_server_is_a_tls_error_on_both(request: Any) -> None:
     finally:
         conn.close()
         server.close()
+
+
+# --- review round 1: the same scenarios on both ----------------------------------------------
+
+
+@pytest.fixture(params=["real", "fake"])
+def any_gateway(request: pytest.FixtureRequest) -> Gateway:
+    return RealGateway() if request.param == "real" else FakeGateway()
+
+
+def test_https_without_a_tls_context_is_a_value_error(any_gateway: Gateway) -> None:
+    with pytest.raises(ValueError):
+        any_gateway.connect(ConnectSpec("https", "127.0.0.1", 8123, 1.0, 1.0))
+
+
+def test_bracketed_ipv6_literal_is_resolved_without_brackets() -> None:
+    seen: list[tuple[str, int]] = []
+
+    class Spy(RealGateway):
+        def resolve(self, host: str, port: int) -> list[gw.AddrInfo]:
+            seen.append((host, port))
+            raise socket.gaierror(-2, "stop here")
+
+    real_conn = Spy().connect(ConnectSpec("http", "[::1]", 8123, 1.0, 1.0))
+    with pytest.raises(socket.gaierror):
+        real_conn.connect()
+    real_conn.close()
+
+    fake = FakeGateway()
+    fake.resolve_errors["::1"] = socket.gaierror(-2, "stop here")
+    fake_conn = fake.connect(ConnectSpec("http", "[::1]", 8123, 1.0, 1.0))
+    with pytest.raises(socket.gaierror):
+        fake_conn.connect()
+    assert seen == fake.resolve_calls == [("::1", 8123)]
+
+
+def _connect_and(b: Backend, action: Any) -> Any:
+    conn = b.gateway.connect(b.spec)
+    try:
+        conn.connect()
+        return action(conn)
+    finally:
+        conn.close()
+
+
+def _request_error(b: Backend, path: str, headers: dict[str, str]) -> BaseException:
+    def act(conn: Any) -> BaseException:
+        try:
+            conn.request("POST", path, b"{}", headers)
+        except BaseException as exc:  # noqa: BLE001 - the class is the result
+            return exc
+        raise AssertionError("request() did not raise")
+
+    return _connect_and(b, act)
+
+
+TOKEN = "SECRET-TOKEN-VALUE"
+BAD_REQUESTS = [
+    ("/a b", {}, http.client.InvalidURL),
+    ("/a\x00b", {}, http.client.InvalidURL),
+    ("/ok", {"Authorization": f"Bearer {TOKEN}\r\nX-Evil: 1"}, ValueError),
+    ("/ok", {"Authorization": f"Bearer {TOKEN}\u2603"}, UnicodeEncodeError),
+    ("/ok", {"Bad:Name": TOKEN}, ValueError),
+]
+
+
+@pytest.mark.parametrize(("path", "headers", "expected"), BAD_REQUESTS)
+def test_request_validation_is_the_same_and_never_echoes_input(
+    make_backend: Any, path: str, headers: dict[str, str], expected: type[BaseException]
+) -> None:
+    exc = _request_error(make_backend("ok"), path, headers)
+    assert type(exc) is expected
+    shown = f"{exc!s} {exc!r} {exc.args!r}"
+    assert TOKEN not in shown and "/a b" not in shown and "\x00" not in shown
+    assert exc.__context__ is None and exc.__cause__ is None
+
+
+def test_a_second_request_before_the_response_is_cannot_send(make_backend: Any) -> None:
+    def act(conn: Any) -> None:
+        conn.request("GET", "/api/", None, {})
+        with pytest.raises(http.client.CannotSendRequest):
+            conn.request("GET", "/api/", None, {})
+
+    _connect_and(make_backend("ok"), act)
+
+
+def test_a_second_getresponse_is_response_not_ready(make_backend: Any) -> None:
+    def act(conn: Any) -> None:
+        conn.request("GET", "/api/", None, {})
+        conn.getresponse()
+        with pytest.raises(http.client.ResponseNotReady):
+            conn.getresponse()
+
+    _connect_and(make_backend("ok"), act)
+
+
+def test_read_of_minus_one_reads_to_the_end(make_backend: Any) -> None:
+    def act(conn: Any) -> bytes:
+        conn.request("GET", "/api/", None, {})
+        return conn.getresponse().read(-1)
+
+    assert _connect_and(make_backend("ok"), act) == b"[]"
+
+
+# --- connect deadline (one monotonic deadline for resolve, every address and TLS) -------------
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+
+def _patched_real(
+    monkeypatch: pytest.MonkeyPatch, addresses: list[float | None]
+) -> tuple[RealGateway, _Clock, list[Any]]:
+    """A real gateway on a fake clock whose addresses either refuse after a delay or blackhole."""
+    clock = _Clock()
+    socks: list[Any] = []
+
+    class FakeSock:
+        def __init__(self, *_a: Any) -> None:
+            self.timeout: float | None = None
+            self.closed = False
+            socks.append(self)
+
+        def settimeout(self, t: float | None) -> None:
+            self.timeout = t
+
+        def connect(self, sockaddr: Any) -> None:
+            assert self.timeout is not None
+            delay = sockaddr[1]
+            if delay is None or delay >= self.timeout:
+                clock.now += self.timeout
+                raise TimeoutError("timed out")
+            clock.now += delay
+            raise ConnectionRefusedError(111, "refused")
+
+        def close(self) -> None:
+            self.closed = True
+
+    class Clocked(RealGateway):
+        def monotonic(self) -> float:
+            return clock.now
+
+        def resolve(self, host: str, port: int) -> list[gw.AddrInfo]:
+            return [(2, 1, 6, "", ("a", d)) for d in addresses]
+
+    import types
+
+    monkeypatch.setattr(gw, "socket", types.SimpleNamespace(socket=FakeSock))
+    return Clocked(), clock, socks
+
+
+@pytest.mark.parametrize("addresses", [[None, None, None], [0.4, None, None], [0.2, 0.3, None]])
+def test_connect_timeout_covers_all_addresses_on_real_and_fake(
+    monkeypatch: pytest.MonkeyPatch, addresses: list[float | None]
+) -> None:
+    spec = ConnectSpec("http", "multi.example", 8123, 1.0, 1.0)
+    real, clock, socks = _patched_real(monkeypatch, addresses)
+    start = clock.now
+    conn = real.connect(spec)
+    with pytest.raises(TimeoutError):
+        conn.connect()
+    assert clock.now - start == pytest.approx(1.0)
+    assert all(s.closed for s in socks)
+
+    fake = FakeGateway()
+    fake.scripts.append(ConnectionScript(address_delays=tuple(addresses)))
+    t0 = fake.monotonic()
+    fconn = fake.connect(spec)
+    with pytest.raises(TimeoutError):
+        fconn.connect()
+    assert fake.monotonic() - t0 == pytest.approx(1.0)
+
+
+def test_all_addresses_refusing_quickly_is_the_last_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = ConnectSpec("http", "multi.example", 8123, 1.0, 1.0)
+    real, _clock, _socks = _patched_real(monkeypatch, [0.1, 0.1])
+    with pytest.raises(ConnectionRefusedError):
+        real.connect(spec).connect()
+    fake = FakeGateway()
+    fake.scripts.append(ConnectionScript(address_delays=(0.1, 0.1)))
+    with pytest.raises(ConnectionRefusedError):
+        fake.connect(spec).connect()
+
+
+def test_a_slow_resolution_eats_the_connect_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = ConnectSpec("http", "slow.example", 8123, 1.0, 1.0)
+    real, clock, _socks = _patched_real(monkeypatch, [0.1])
+    inner = real.resolve
+
+    def slow_resolve(host: str, port: int) -> list[gw.AddrInfo]:
+        clock.now += 1.5
+        return inner(host, port)
+
+    monkeypatch.setattr(real, "resolve", slow_resolve)
+    with pytest.raises(TimeoutError):
+        real.connect(spec).connect()
+
+    fake = FakeGateway()
+    fake.resolve_delay = 1.5
+    with pytest.raises(TimeoutError):
+        fake.connect(spec).connect()
+
+
+def test_connect_delay_beyond_the_timeout_is_a_timeout_on_the_fake() -> None:
+    fake = FakeGateway()
+    fake.scripts.append(ConnectionScript(connect_delay=5.0))
+    t0 = fake.monotonic()
+    with pytest.raises(TimeoutError):
+        fake.connect(ConnectSpec("http", "x.example", 80, 2.0, 2.0)).connect()
+    assert fake.monotonic() - t0 == pytest.approx(2.0)
+
+
+def test_a_tls_handshake_stall_is_bounded_by_the_connect_timeout() -> None:
+    server = LoopbackServer(None)  # accepts, reads the ClientHello, answers nothing
+    real = RealGateway()
+    spec = ConnectSpec("https", "127.0.0.1", server.port, 0.5, 5.0, tls=real.new_tls_context([]))
+    conn = real.connect(spec)
+    t0 = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError):
+            conn.connect()
+    finally:
+        conn.close()
+        server.close()
+    assert time.monotonic() - t0 < 3.0
+
+
+# --- internals of the real connection ---------------------------------------------------------
+
+
+def test_the_http_client_seam_must_exist(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Renamed:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+    monkeypatch.setattr(gw.http.client, "HTTPConnection", Renamed)
+    with pytest.raises(gw.GatewayError):
+        RealGateway().connect(ConnectSpec("http", "127.0.0.1", 80, 1.0, 1.0))
+
+
+def test_the_http_client_seam_is_ours() -> None:
+    conn = RealGateway().connect(ConnectSpec("http", "127.0.0.1", 80, 1.0, 1.0))
+    inner: Any = conn._conn  # pyright: ignore[reportPrivateUsage]
+    assert inner._create_connection == conn._open_socket  # pyright: ignore[reportPrivateUsage]

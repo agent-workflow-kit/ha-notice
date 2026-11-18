@@ -25,6 +25,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import http.client
+import math
 import os
 import pwd
 import select
@@ -204,15 +205,23 @@ def build_tls_context(ca_files: Sequence[str]) -> ssl.SSLContext:
 
     ``load_default_certs`` and ``set_default_verify_paths`` are never called, because they
     follow ``SSL_CERT_FILE`` and ``SSL_CERT_DIR``. Which files to pass (the compiled defaults
-    that are usable, plus the config ``ca_file``) is decided by the HTTP client.
+    that are usable, plus the config ``ca_file``) is decided by the HTTP client. A file that
+    cannot be read or parsed raises ``GatewayError`` with a fixed message (never the path).
     TODO(#22): trust selection (usable bundle, non-empty directory, fallback files).
     """
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.check_hostname = True
     ctx.verify_mode = ssl.CERT_REQUIRED
+    failed = False
     for path in ca_files:
-        ctx.load_verify_locations(cafile=path)
+        try:
+            ctx.load_verify_locations(cafile=path)
+        except (OSError, ssl.SSLError, ValueError):
+            failed = True
+            break
+    if failed:  # raised outside the handler so no context carries the path
+        raise GatewayError("trust file cannot be loaded")
     return ctx
 
 
@@ -225,17 +234,37 @@ class _RealResponse:
     def __init__(self, response: http.client.HTTPResponse) -> None:
         self._response = response
         self.status: int = response.status
+        # ``http.client`` returns a short ``read(amt)`` silently when the peer closes before
+        # Content-Length bytes arrive, so the declared length is tracked here.
+        self._expected: int | None = response.length
 
     def read(self, amt: int) -> bytes:
-        return self._response.read(amt)
+        if amt < 0:
+            data = self._response.read()  # raises IncompleteRead itself on a short body
+            self._expected = 0 if self._expected is not None else None
+            return data
+        data = self._response.read(amt)
+        if self._expected is not None:
+            self._expected -= len(data)
+            if not data and amt > 0 and self._expected > 0:
+                raise IncompleteRead(b"", self._expected)
+        return data
 
 
 class _RealConnection:
-    """``http.client`` connection that resolves through the gateway and sets its own timeouts."""
+    """``http.client`` connection that resolves through the gateway and sets its own timeouts.
+
+    ``connect_timeout`` is one monotonic deadline that starts in ``connect()`` and covers name
+    resolution, every address and the TLS handshake. After ``connect()`` only the per-operation
+    ``io_timeout`` applies: neither this class nor ``http.client`` bounds a whole exchange (a
+    server can send ``100 Continue`` responses forever), so the overall send deadline is enforced
+    by the caller's worker thread and ``os._exit``, never here.
+    """
 
     def __init__(self, gateway: RealGateway, spec: ConnectSpec) -> None:
         self._gateway = gateway
         self._spec = spec
+        self._deadline = 0.0
         if spec.scheme == "https":
             if spec.tls is None:
                 raise ValueError("https needs a TLS context")
@@ -245,9 +274,18 @@ class _RealConnection:
         else:
             conn = http.client.HTTPConnection(spec.host, spec.port, timeout=spec.connect_timeout)
         # http.client's connect() calls this to open the TCP socket (and wraps it in TLS
-        # afterwards); ours resolves through the gateway instead of the socket module.
+        # afterwards); ours resolves through the gateway instead of the socket module. If a
+        # Python release renames the attribute, fail loudly instead of silently using the
+        # stdlib resolver.
+        if not hasattr(conn, "_create_connection"):
+            raise GatewayError("http.client connection seam is missing")
         conn._create_connection = self._open_socket  # pyright: ignore[reportAttributeAccessIssue]
+        if conn._create_connection != self._open_socket:  # pyright: ignore[reportAttributeAccessIssue]
+            raise GatewayError("http.client connection seam is not in use")
         self._conn = conn
+
+    def _time_left(self) -> float:
+        return self._deadline - self._gateway.monotonic()
 
     def _open_socket(
         self,
@@ -257,27 +295,52 @@ class _RealConnection:
     ) -> socket.socket:
         host, port = address
         last: OSError | None = None
-        for family, kind, proto, _canon, sockaddr in self._gateway.resolve(host, port):
+        addresses = self._gateway.resolve(host, port)
+        for family, kind, proto, _canon, sockaddr in addresses:
+            left = self._time_left()
+            if left <= 0:
+                raise TimeoutError("connect timed out")
             sock = socket.socket(family, kind, proto)
             try:
-                sock.settimeout(self._spec.connect_timeout)
+                sock.settimeout(left)
                 sock.connect(sockaddr)  # pyright: ignore[reportArgumentType]
             except OSError as exc:
                 sock.close()
                 last = exc
                 continue
             return sock
+        if self._time_left() <= 0:
+            raise TimeoutError("connect timed out")
         raise last if last is not None else OSError(errno.EHOSTUNREACH, "no address")
 
     def connect(self) -> None:
-        self._conn.connect()  # TCP, then TLS, both under the connect timeout
+        self._deadline = self._gateway.monotonic() + self._spec.connect_timeout
+        self._conn.connect()  # name resolution, TCP, then TLS, all under the one deadline
+        if self._time_left() <= 0:
+            raise TimeoutError("connect timed out")
         if self._conn.sock is not None:
             self._conn.sock.settimeout(self._spec.io_timeout)
 
     def request(
         self, method: str, path: str, body: bytes | None, headers: Mapping[str, str]
     ) -> None:
-        self._conn.request(method, path, body=body, headers=dict(headers))
+        # http.client's validation errors echo the offending text (a header value may be the
+        # token), so they are replaced by fixed ones, raised outside the handler (no context).
+        failure: type[BaseException] | None = None
+        try:
+            self._conn.request(method, path, body=body, headers=dict(headers))
+        except UnicodeEncodeError:
+            failure = UnicodeEncodeError
+        except InvalidURL:
+            failure = InvalidURL
+        except ValueError:
+            failure = ValueError
+        if failure is UnicodeEncodeError:
+            raise UnicodeEncodeError("latin-1", "", 0, 1, "request text is not encodable")
+        if failure is InvalidURL:
+            raise InvalidURL("invalid request path")
+        if failure is ValueError:
+            raise ValueError("invalid header")
 
     def getresponse(self) -> _RealResponse:
         return _RealResponse(self._conn.getresponse())
@@ -338,7 +401,8 @@ class RealGateway:
         Reads in slices of at most ``SLICE_SECONDS`` and asks ``remaining()`` (seconds left,
         0 or less means expired) before each, so a stalled producer cannot hold the caller past
         its deadline. A signal the caller wants noticed makes ``remaining`` return 0. A closed
-        or unreadable descriptor is empty input. A path is opened ``O_NONBLOCK`` and the opened
+        descriptor is empty input; any other read error, or any error after data arrived, is
+        ``SourceError``. A path is opened ``O_NONBLOCK`` and the opened
         descriptor must be a regular file, else ``SourceError``.
         """
         if isinstance(source, str):
@@ -365,24 +429,35 @@ class RealGateway:
 
     @staticmethod
     def _read_fd(fd: int, max_bytes: int, remaining: Callable[[], float]) -> SourceResult:
+        # ``poll`` rather than ``select``: select cannot watch a descriptor >= 1024. A negative
+        # descriptor raises ValueError (a caller bug, never swallowed).
+        poller = select.poll()
+        poller.register(fd, select.POLLIN)
         data = bytearray()
         while True:
             left = remaining()
             if left <= 0:
                 return SourceResult(bytes(data), "timeout")
-            try:
-                ready, _, _ = select.select([fd], [], [], min(SLICE_SECONDS, left))
-            except (OSError, ValueError):
-                break  # closed or unusable descriptor: empty (or what arrived so far)
-            if not ready:
+            events = poller.poll(max(1, math.ceil(min(SLICE_SECONDS, left) * 1000)))
+            if not events:
                 continue
+            if events[0][1] & select.POLLNVAL:
+                if data:
+                    raise SourceError("input descriptor was closed while reading")
+                break  # a closed descriptor is empty input
             want = min(FILE_CHUNK, max_bytes + 1 - len(data))
+            failed_errno = 0
+            chunk = b""
             try:
                 chunk = os.read(fd, want)
             except BlockingIOError:
                 continue
-            except OSError:
-                break
+            except OSError as exc:
+                failed_errno = exc.errno or -1
+            if failed_errno:  # raised outside the handler: no context carries the OS text
+                if failed_errno == errno.EBADF and not data:
+                    break
+                raise SourceError("input cannot be read")
             if not chunk:
                 break
             data += chunk
@@ -395,11 +470,14 @@ class RealGateway:
         """Create (mode 0700) and open ``<home>/.local/state/ha-notice``; return its descriptor.
 
         The directory is opened ``O_DIRECTORY | O_NOFOLLOW`` and must be owned by the user with
-        no group or other permissions, else ``StateDirError``.
+        no group or other permissions, else ``StateDirError``; ``home`` must be absolute. Ownership
+        is checked against ``self.uid()`` so a test can inject the user.
         """
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
         parent_fd = -1
         fd = -1
+        if not os.path.isabs(home):
+            raise StateDirError("state directory home is not absolute")
         try:
             parent = os.path.join(home, *STATE_DIR_PARTS[:-1])
             os.makedirs(parent, mode=0o700, exist_ok=True)
@@ -410,7 +488,7 @@ class RealGateway:
                 pass
             fd = os.open(STATE_DIR_PARTS[-1], flags | os.O_NOFOLLOW, dir_fd=parent_fd)
             st = os.fstat(fd)
-            if st.st_uid != os.getuid() or st.st_mode & 0o077:
+            if st.st_uid != self.uid() or st.st_mode & 0o077:
                 raise StateDirError("state directory is not private to the user")
             result, fd = fd, -1
             return result

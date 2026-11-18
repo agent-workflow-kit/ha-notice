@@ -584,18 +584,30 @@ def test_tls_context_loads_nothing_from_the_environment(
     assert ctx.cert_store_stats() == {"x509": 0, "crl": 0, "x509_ca": 0}
 
 
-def test_tls_context_with_a_missing_file_raises_oserror(real: RealGateway, tmp_path: Path) -> None:
-    with pytest.raises(OSError):
-        real.new_tls_context([str(tmp_path / "missing.pem")])
-
-
-def test_tls_context_with_an_unparsable_file_raises_ssl_error(
+def test_tls_context_with_a_missing_file_raises_a_fixed_gateway_error(
     real: RealGateway, tmp_path: Path
 ) -> None:
-    f = tmp_path / "junk.pem"
+    path = str(tmp_path / "missing-secret-name.pem")
+    with pytest.raises(gw.GatewayError) as exc:
+        real.new_tls_context([path])
+    assert_no_text(exc.value, path, "missing-secret-name")
+
+
+def test_tls_context_with_an_unparsable_file_raises_a_fixed_gateway_error(
+    real: RealGateway, tmp_path: Path
+) -> None:
+    f = tmp_path / "junk-secret-name.pem"
     f.write_text("junk")
-    with pytest.raises(ssl.SSLError):
+    with pytest.raises(gw.GatewayError) as exc:
         real.new_tls_context([str(f)])
+    assert_no_text(exc.value, str(f), "junk-secret-name")
+
+
+def assert_no_text(exc: BaseException, *texts: str) -> None:
+    shown = f"{exc!s} {exc!r} {exc.args!r}"
+    for text in texts:
+        assert text not in shown
+    assert exc.__context__ is None
 
 
 # --- process --------------------------------------------------------------------------------
@@ -615,3 +627,120 @@ def test_exit_process_calls_os_exit(real: RealGateway, monkeypatch: pytest.Monke
     with pytest.raises(Stop):
         real.exit_process(7)
     assert codes == [7]
+
+
+# --- review round 1 ---------------------------------------------------------------------------
+
+
+def test_read_source_works_for_a_descriptor_above_1024(real: RealGateway) -> None:
+    import fcntl
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if hard != resource.RLIM_INFINITY and hard < 1300:
+        pytest.skip("descriptor limit too low")
+    if soft != resource.RLIM_INFINITY and soft < 1300:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (1300, hard))
+    r, w = os.pipe()
+    high = fcntl.fcntl(r, fcntl.F_DUPFD, 1100)
+    try:
+        os.write(w, b"abc")
+        os.close(w)
+        res = real.read_source(high, 10, never_expires)
+        assert (res.data, res.status) == (b"abc", "ok")
+    finally:
+        os.close(r)
+        os.close(high)
+
+
+def test_read_source_closed_descriptor_above_1024_is_empty_input(real: RealGateway) -> None:
+    import fcntl
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if hard != resource.RLIM_INFINITY and hard < 1300:
+        pytest.skip("descriptor limit too low")
+    if soft != resource.RLIM_INFINITY and soft < 1300:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (1300, hard))
+    r, w = os.pipe()
+    high = fcntl.fcntl(r, fcntl.F_DUPFD, 1100)
+    os.close(high)
+    os.close(r)
+    os.close(w)
+    res = real.read_source(high, 10, never_expires)
+    assert (res.data, res.status) == (b"", "ok")
+
+
+def test_read_source_negative_descriptor_is_not_swallowed(real: RealGateway) -> None:
+    with pytest.raises(ValueError):
+        real.read_source(-1, 10, never_expires)
+
+
+def test_read_source_error_after_data_is_a_source_error(
+    real: RealGateway, pipe: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    r, w = pipe
+    os.write(w, b"abc")
+    os.close(w)  # the next poll reports hang-up, so the second read happens
+    calls: list[int] = []
+    real_read = os.read
+
+    def flaky(fd: int, n: int) -> bytes:
+        if fd != r:
+            return real_read(fd, n)
+        calls.append(n)
+        if len(calls) == 1:
+            return real_read(fd, n)
+        raise OSError(5, "io error")
+
+    monkeypatch.setattr(gw.os, "read", flaky)
+    with pytest.raises(SourceError) as exc:
+        real.read_source(r, 10, never_expires)
+    assert_no_text(exc.value, "io error")
+
+
+def test_read_source_error_before_any_data_is_a_source_error_unless_ebadf(
+    real: RealGateway, pipe: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    r, w = pipe
+    os.write(w, b"x")
+
+    def failing(fd: int, n: int) -> bytes:
+        raise OSError(5, "io error")
+
+    monkeypatch.setattr(gw.os, "read", failing)
+    with pytest.raises(SourceError):
+        real.read_source(r, 10, never_expires)
+
+
+def test_state_dir_uses_the_gateways_uid(tmp_path: Path) -> None:
+    class Other(RealGateway):
+        def uid(self) -> int:
+            return os.getuid() + 1
+
+    with pytest.raises(StateDirError):
+        Other().open_state_dir(str(tmp_path))
+
+
+def test_state_dir_uses_the_gateways_uid_and_accepts_a_match(tmp_path: Path) -> None:
+    seen: list[int] = []
+
+    class Same(RealGateway):
+        def uid(self) -> int:
+            seen.append(1)
+            return os.getuid()
+
+    g = Same()
+    fd = g.open_state_dir(str(tmp_path))
+    g.close_fd(fd)
+    assert seen
+
+
+@pytest.mark.parametrize("home", ["", "relh", "./relh"])
+def test_state_dir_refuses_a_home_that_is_not_absolute(
+    real: RealGateway, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(StateDirError):
+        real.open_state_dir(home)
+    assert list(tmp_path.iterdir()) == []

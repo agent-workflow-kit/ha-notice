@@ -13,6 +13,7 @@ that the test sets, with a hard cap so a broken test fails instead of hanging.
 from __future__ import annotations
 
 import http.client
+import re
 import threading
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
@@ -56,6 +57,9 @@ class ConnectionScript:
 
     resolve: bool = True  # call the gateway's resolver in connect(), as the real one does
     connect_delay: float = 0.0  # seconds the fake clock advances inside connect()
+    # One entry per address the name resolves to: seconds until that address refuses, or None
+    # for a blackhole. Replaces ``connect_delay``; every wait is cut off by the connect deadline.
+    address_delays: tuple[float | None, ...] = ()
     connect_block: threading.Event | None = None  # connect() waits for this event
     connect_error: BaseException | None = None
     request_error: BaseException | None = None  # raised by request() after the partial write
@@ -63,6 +67,9 @@ class ConnectionScript:
     status: int = 200
     body: bytes = b"[]"
     response_error: BaseException | None = None  # raised by getresponse()
+    read_error: BaseException | None = None  # raised by read() once read_error_after bytes are out
+    read_error_after: int = 0
+    declared_length: int | None = None  # Content-Length; fewer body bytes is IncompleteRead
     stall_after_first_byte: threading.Event | None = None  # read() waits after byte one
 
 
@@ -80,17 +87,32 @@ class FakeResponse:
         self._body = script.body
         self._pos = 0
         self._stall = script.stall_after_first_byte
+        self._read_error = script.read_error
+        self._read_error_after = script.read_error_after
+        self._declared = script.declared_length
 
     def read(self, amt: int) -> bytes:
+        if self._read_error is not None and self._pos >= self._read_error_after:
+            raise self._read_error
         if amt < 0:
-            raise ValueError("amt must not be negative")
+            amt = len(self._body) - self._pos
         if self._stall is not None and self._pos >= 1:
             self._stall.wait(WAIT_CAP_SECONDS)
         if self._stall is not None and self._pos == 0:
             amt = min(amt, 1)
+        if self._read_error is not None:
+            amt = min(amt, self._read_error_after - self._pos)
         chunk = self._body[self._pos : self._pos + amt]
         self._pos += len(chunk)
+        if not chunk and amt > 0 and self._declared is not None and self._pos < self._declared:
+            raise http.client.IncompleteRead(b"", self._declared - self._pos)
         return chunk
+
+
+# Mirrors http.client's own checks (the messages are never copied: they echo the input).
+_BAD_PATH = re.compile(r"[\x00-\x20\x7f]")
+_BAD_HEADER_NAME = re.compile(r"^[^:\s][^:\r\n]*$")
+_BAD_HEADER_VALUE = re.compile(r"\n(?![ \t])|\r(?![ \t\n])")
 
 
 class FakeConnection:
@@ -102,33 +124,73 @@ class FakeConnection:
         self.closed = False
         self.requests: list[RecordedRequest] = []
         self.bytes_written = 0
-        self._request_done = False
+        self._request_sent = False  # a request is written and its response not yet taken
 
     def connect(self) -> None:
+        gateway = self._gateway
+        deadline = gateway.monotonic() + self.spec.connect_timeout
         if self.script.resolve:
-            self._gateway.resolve(self.spec.host, self.spec.port)
+            host = self.spec.host
+            if host.startswith("[") and host.endswith("]"):
+                host = host[1:-1]  # http.client strips the brackets of an IPv6 literal
+            gateway.resolve(host, self.spec.port)
         if self.script.connect_block is not None:
             self.script.connect_block.wait(WAIT_CAP_SECONDS)
-        self._gateway.advance(self.script.connect_delay)
+        self._spend(deadline, self.script.connect_delay)
+        if self.script.address_delays:
+            for delay in self.script.address_delays:
+                # None is a blackhole: it outlasts any deadline.
+                self._spend(deadline, self.spec.connect_timeout + 1 if delay is None else delay)
+            raise ConnectionRefusedError(111, "Connection refused")
         if self.script.connect_error is not None:
             raise self.script.connect_error
         self.connected = True
+
+    def _spend(self, deadline: float, seconds: float) -> None:
+        """Advance the clock, but never past the connect deadline (that is a TimeoutError)."""
+        left = deadline - self._gateway.monotonic()
+        if seconds >= left:
+            self._gateway.advance(max(left, 0.0))
+            raise TimeoutError("timed out")
+        self._gateway.advance(seconds)
 
     def request(
         self, method: str, path: str, body: bytes | None, headers: Mapping[str, str]
     ) -> None:
         if not self.connected:
             self.connect()
+        if self._request_sent:
+            raise http.client.CannotSendRequest("Request-sent")
+        self._validate(path, headers)
         if self.script.request_error is not None:
             self.bytes_written += self.script.request_bytes_before_error
             raise self.script.request_error
         self.bytes_written += len(body or b"") + len(path) + len(method)
         self.requests.append(RecordedRequest(method, path, body, dict(headers)))
-        self._request_done = True
+        self._request_sent = True
+
+    @staticmethod
+    def _validate(path: str, headers: Mapping[str, str]) -> None:
+        """What the real connection rejects, with the same classes and fixed messages."""
+        if _BAD_PATH.search(path):
+            raise http.client.InvalidURL("invalid request path")
+        for name, value in headers.items():
+            if not _BAD_HEADER_NAME.match(name):
+                raise ValueError("invalid header")
+            if _BAD_HEADER_VALUE.search(value):
+                raise ValueError("invalid header")
+            try:
+                value.encode("latin-1")
+            except UnicodeEncodeError:
+                pass
+            else:
+                continue
+            raise UnicodeEncodeError("latin-1", "", 0, 1, "header value is not latin-1")
 
     def getresponse(self) -> FakeResponse:
-        if not self._request_done:
+        if not self._request_sent:
             raise http.client.ResponseNotReady("no request was sent")
+        self._request_sent = False
         if self.script.response_error is not None:
             raise self.script.response_error
         return FakeResponse(self.script)
@@ -146,6 +208,7 @@ class FakeGateway:
     hosts: dict[str, list[AddrInfo]] = field(default_factory=dict)
     resolve_errors: dict[str, BaseException] = field(default_factory=dict)
     resolve_block: threading.Event | None = None
+    resolve_delay: float = 0.0  # seconds the fake clock advances inside resolve()
     home: str | HomeLookupError = "/nonexistent-fake-home"
     user_id: int = 1000
     login: str | None = "fakeuser"
@@ -182,6 +245,7 @@ class FakeGateway:
         self.resolve_calls.append((host, port))
         if self.resolve_block is not None:
             self.resolve_block.wait(WAIT_CAP_SECONDS)
+        self.advance(self.resolve_delay)
         if host in self.resolve_errors:
             raise self.resolve_errors[host]
         if host in self.hosts:
@@ -253,6 +317,8 @@ class FakeGateway:
         return gw.build_tls_context(ca_files)
 
     def connect(self, spec: ConnectSpec) -> FakeConnection:
+        if spec.scheme == "https" and spec.tls is None:
+            raise ValueError("https needs a TLS context")
         script = self.scripts.popleft() if self.scripts else self.default_script
         conn = FakeConnection(self, spec, script)
         self.connections.append(conn)

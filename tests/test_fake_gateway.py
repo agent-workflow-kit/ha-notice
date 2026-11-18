@@ -6,14 +6,17 @@ import http.client
 import socket
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from ha_notice.cli import main
-from ha_notice.gateway import ConnectSpec, HomeLookupError, SourceError
+from ha_notice.gateway import ConnectSpec, HomeLookupError, SourceError, build_tls_context
 from tests.fake_gateway import ConnectionScript, FakeExit, FakeGateway, StallingSource
 
-SPEC = ConnectSpec("https", "ha.example", 8123, connect_timeout=3.0, io_timeout=10.0)
+SPEC = ConnectSpec(
+    "https", "ha.example", 8123, connect_timeout=3.0, io_timeout=10.0, tls=build_tls_context([])
+)
 
 
 def test_clock_is_scripted_and_sleep_advances_it() -> None:
@@ -154,11 +157,60 @@ def test_state_dir_works_on_a_private_home(tmp_path: Path) -> None:
     assert (tmp_path / ".local" / "state" / "ha-notice").is_dir()
 
 
-def test_main_runs_in_process_with_a_fake_gateway_and_touches_no_network() -> None:
-    g = FakeGateway()
-    assert main(["--json"], {}, g) == 2  # no subcommand: usage
-    assert g.resolve_calls == [] and g.connections == []
+class _Tripwire:
+    """A gateway that fails on any use (``main`` must not touch it for a usage error)."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"the gateway was touched: {name}")
+
+
+def test_main_usage_error_touches_no_gateway_method() -> None:
+    # TODO(#6): once the commands exist, wire the same tripwire through the command handlers;
+    # criterion wiring (env and gateway reaching the commands) lands in #6.
+    assert main(["--json"], {}, _Tripwire()) == 2  # type: ignore[arg-type]
+    assert main([], {}, _Tripwire()) == 2  # type: ignore[arg-type]
+
+
+def test_the_tripwire_does_trip() -> None:
+    with pytest.raises(AssertionError):
+        _Tripwire().resolve("x", 1)
 
 
 def test_main_accepts_the_old_call_shape() -> None:
     assert main(["--json"]) == 2
+
+
+def test_response_read_error_is_scripted_after_some_bytes() -> None:
+    g = FakeGateway()
+    g.scripts.append(
+        ConnectionScript(body=b"abcdef", read_error=TimeoutError("timed out"), read_error_after=3)
+    )
+    conn = g.connect(SPEC)
+    conn.connect()
+    conn.request("GET", "/", None, {})
+    resp = conn.getresponse()
+    assert resp.read(2) == b"ab"
+    assert resp.read(10) == b"c"
+    with pytest.raises(TimeoutError):
+        resp.read(10)
+
+
+def test_short_body_raises_incomplete_read() -> None:
+    g = FakeGateway()
+    g.scripts.append(ConnectionScript(body=b"abcd", declared_length=100))
+    conn = g.connect(SPEC)
+    conn.connect()
+    conn.request("GET", "/", None, {})
+    resp = conn.getresponse()
+    assert resp.read(10) == b"abcd"
+    with pytest.raises(http.client.IncompleteRead):
+        resp.read(10)
+
+
+def test_read_minus_one_reads_to_eof() -> None:
+    g = FakeGateway()
+    g.scripts.append(ConnectionScript(body=b"abcdef"))
+    conn = g.connect(SPEC)
+    conn.connect()
+    conn.request("GET", "/", None, {})
+    assert conn.getresponse().read(-1) == b"abcdef"
