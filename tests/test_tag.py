@@ -12,9 +12,10 @@ import pytest
 
 from ha_notice.cli import DEDUPE_KEY_MAX
 from ha_notice.payload import Notification
-from ha_notice.render import render, tag_from_dedupe_key
+from ha_notice.render import dedupe_key_sha256, render, tag_from_dedupe_key
 
-# Computed outside Python with ``printf '%s' <key> | sha256sum | cut -c1-24``.
+# Computed outside Python with ``printf '%s' <key> | sha256sum | cut -c1-24`` (the first 16
+# characters are ``dedupe_key_sha256``).
 VECTORS = [
     ("a", "awkit-ca978112ca1bbdcafac231b3"),
     ("-abc", "awkit-649d85fcc5d7e13d1217fc85"),
@@ -46,12 +47,12 @@ def test_shape_is_lowercase_hex_and_does_not_contain_the_key(key: str) -> None:
 
 def test_deterministic_and_distinct() -> None:
     assert tag_from_dedupe_key("k") == tag_from_dedupe_key("k")
-    keys = ["a", "A", "a ", " a", "a\n", "a\x00", "\x00a", "é", "é"]
+    keys = ["a", "A", "a ", " a", "a\n", "a\x00", "\x00a", "e\u0301", "\u00e9"]
     assert len({tag_from_dedupe_key(k) for k in keys}) == len(keys)
 
 
 def test_key_is_not_normalized_or_case_folded() -> None:
-    assert tag_from_dedupe_key("é") != tag_from_dedupe_key("é")
+    assert tag_from_dedupe_key("\u00e9") != tag_from_dedupe_key("e\u0301")
     assert tag_from_dedupe_key("K") != tag_from_dedupe_key("k")
 
 
@@ -96,7 +97,7 @@ def test_independent_of_locale_and_environment(key: str, tag: str) -> None:
         "sys.stdout.write(t(open(0, 'rb').read().decode('utf-8')))"
     )
     env = {"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONHASHSEED": "random"}
-    for name in ("PATH", "PYTHONPATH", "VIRTUAL_ENV"):
+    for name in ("PATH", "VIRTUAL_ENV"):
         if name in os.environ:
             env[name] = os.environ[name]
     # The key crosses the process boundary on stdin as bytes, never argv, to stay locale-free.
@@ -116,3 +117,68 @@ def test_longest_multibyte_key_the_cli_accepts_derives() -> None:
     key = "é" * DEDUPE_KEY_MAX
     expected = "awkit-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
     assert tag_from_dedupe_key(key) == expected
+
+
+@pytest.mark.parametrize(("key", "tag"), VECTORS)
+def test_dedupe_key_sha256_fixed_vectors_and_prefix_of_the_tag(key: str, tag: str) -> None:
+    digest = dedupe_key_sha256(key)
+    assert re.fullmatch(r"[0-9a-f]{16}", digest)
+    assert digest == tag[6:22]
+
+
+@pytest.mark.parametrize(
+    ("key", "digest"),
+    [
+        ("a", "ca978112ca1bbdca"),
+        ("-abc", "649d85fcc5d7e13d"),
+        ("\u00e9", "4a99557e4033c353"),
+        ("\U0001f600", "f0443a342c5ef547"),
+        ("a\x00b", "59b271ae1bbcb1d3"),
+        ("a\nb", "7e18f737311b2dc3"),
+        ("a" * 1024, "2edc986847e209b4"),
+    ],
+)
+def test_dedupe_key_sha256_golden(key: str, digest: str) -> None:
+    # Computed outside Python with ``printf '%s' <key> | sha256sum | cut -c1-16``.
+    assert dedupe_key_sha256(key) == digest
+
+
+def test_dedupe_key_sha256_error_contract() -> None:
+    with pytest.raises(TypeError):
+        dedupe_key_sha256(b"a")  # type: ignore[arg-type]
+    for bad in ("", "x" * (DEDUPE_KEY_MAX + 1)):
+        with pytest.raises(ValueError, match="dedupe key"):
+            dedupe_key_sha256(bad)
+    with pytest.raises(ValueError, match="UTF-8") as exc:
+        dedupe_key_sha256("a\ud800")
+    assert str(exc.value) == "dedupe key is not valid UTF-8"
+
+
+def test_render_without_a_tag_has_no_tag_key() -> None:
+    n = Notification(message="hello", level="info", title=None, link="https://x.example/a")
+    out = render(n, max_chars=1000, default_group="g", level_prefix={"info": ""})
+    assert "tag" not in out.body["data"]
+    plain = Notification(message="hi", level="info", title=None, link=None)
+    bare = render(plain, max_chars=1000, default_group=None, level_prefix={"info": ""})
+    assert "data" not in bare.body
+
+
+def test_lone_surrogate_error_carries_no_context_or_cause() -> None:
+    # __context__ would keep the UnicodeEncodeError, whose .object is the key.
+    with pytest.raises(ValueError, match="UTF-8") as exc:
+        tag_from_dedupe_key("a\ud800")
+    assert exc.value.__context__ is None
+    assert exc.value.__cause__ is None
+
+
+class _Hostile(str):
+    def encode(self, *args: object, **kwargs: object) -> bytes:  # type: ignore[override]
+        return b"other"
+
+    def __len__(self) -> int:
+        return 0
+
+
+def test_str_subclass_cannot_change_what_is_hashed() -> None:
+    assert tag_from_dedupe_key(_Hostile("abc")) == tag_from_dedupe_key("abc")
+    assert dedupe_key_sha256(_Hostile("abc")) == dedupe_key_sha256("abc")
