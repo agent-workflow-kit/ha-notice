@@ -90,6 +90,7 @@ Later (additive, after a live phone test): whether `importance`, `channel`, `ttl
 | `send.py` | The `send` pipeline: config, disabled check, input, validation, render, dry-run output; hands the rendered request to the delivery step. |
 | `hass.py` | URL building, request building, one attempt, the probe call. |
 | `retry.py` | The retry loop: 429 and connect-phase retries, waits, attempt facts; the gate seam for the deadline. |
+| `deadline.py` | The whole-send deadline: the three-state `WritingGate` (one lock, never held across a socket call, with the result slot), the daemon worker thread that runs the retry loop, the main-thread wait and the decision at the deadline, and `finish` (`exit_process` when the worker may still run). |
 | `response.py` | Pure mapping of one answer or exception (with the gate state) to a success or an error spec; no I/O. |
 | `state.py` | Opens the state directory through the gateway (home from the password database, mode 0700, no symlink, owner check) and the files below it; any problem is one `StateUnusable` and the fixed warning, printed once. |
 | `log.py` | Log record writing, bounded lock, rotation and reopen. |
@@ -97,7 +98,7 @@ Later (additive, after a live phone test): whether `importance`, `channel`, `ttl
 
 ## Data model, concurrency, errors
 
-No stored objects. The log lock is the only lock. Errors use the envelope in [Error envelope](interface.md#error-envelope); log failures never change an exit code.
+No stored objects. The log lock is the only file lock; the in-process gate lock (`deadline.py`) guards the gate state and the result slot in short sections and is never held across a socket call. Errors use the envelope in [Error envelope](interface.md#error-envelope); log failures never change an exit code.
 
 ## Test strategy
 

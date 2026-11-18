@@ -16,9 +16,10 @@ retries only what ``ErrorSpec.retry`` marks, per docs/interface.md (Home Assista
 
 Every attempt opens a fresh connection (``Connection: close``) and takes the idle-to-writing gate
 step through ``before_write``; a fully read 429 returns the gate to idle before the next attempt.
-The gate, the worker thread and the whole-send deadline belong to #25; ``AttemptGate`` is the seam
-and ``LocalGate`` the single-threaded stand-in. The loop reads no clock: waits go through the
-``sleep`` it is given (the gateway's) and the time left comes from ``remaining``.
+The gate, the worker thread and the whole-send deadline are ``deadline.py`` (#25);
+``AttemptGate`` is the seam and ``LocalGate`` the single-threaded stand-in for tests.
+The loop reads no clock: waits go through the ``sleep`` it is given (the gateway's)
+and the time left comes from ``remaining``.
 """
 
 from __future__ import annotations
@@ -55,9 +56,9 @@ MAX_CONNECTION_RETRIES = 1
 
 
 class AttemptGate(Protocol):
-    """What the loop needs from the writing gate. TODO(#25): the locked three-state gate
-    (idle, writing, abandoned) implements this; its ``enter_writing`` raises to refuse once the
-    gate is abandoned."""
+    """What the loop needs from the writing gate. ``deadline.WritingGate`` (the locked
+    three-state gate) implements this; its ``enter_writing`` raises to refuse once the gate is
+    abandoned."""
 
     def enter_writing(self) -> None:
         """The idle-to-writing step, run before the first call that can write request bytes."""
@@ -79,7 +80,7 @@ class AttemptGate(Protocol):
 
 class LocalGate:
     """A single-threaded gate with no lock and no deadline (``abandon`` is for tests).
-    TODO(#25): replaced by the real one."""
+    The real one is ``deadline.WritingGate``."""
 
     def __init__(self) -> None:
         self._state = Gate.IDLE
@@ -201,5 +202,5 @@ def run_attempts(
             rate_retries += 1
         else:
             conn_retries += 1
-        if gate.abandoned():  # TODO(#25): the deadline fired during the wait
+        if gate.abandoned():  # the deadline fired during the wait
             return outcome(result, requests, wait)
