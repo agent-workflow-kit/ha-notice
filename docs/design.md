@@ -88,7 +88,8 @@ Later (additive, after a live phone test): whether `importance`, `channel`, `ttl
 | `link.py` | The link rule (syntax, scheme, port, IPv6 literal); no URL parser. |
 | `render.py` | Request body: title, message, `data` allowlist, truncation. |
 | `send.py` | The `send` pipeline: config, disabled check, input, validation, render, dry-run output; hands the rendered request to the delivery step. |
-| `hass.py` | URL building, request building, 429 and connect retries, the deadline, the probe call. |
+| `hass.py` | URL building, request building, one attempt, the probe call. |
+| `retry.py` | The retry loop: 429 and connect-phase retries, waits, attempt facts; the gate seam for the deadline. |
 | `response.py` | Pure mapping of one answer or exception (with the gate state) to a success or an error spec; no I/O. |
 | `state.py` | Opens the state directory through the gateway (home from the password database, mode 0700, no symlink, owner check) and the files below it; any problem is one `StateUnusable` and the fixed warning, printed once. |
 | `log.py` | Log record writing, bounded lock, rotation and reopen. |
