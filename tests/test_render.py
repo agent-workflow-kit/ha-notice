@@ -337,14 +337,9 @@ def test_unknown_level_is_a_programming_error() -> None:
 
 def test_render_accepts_no_data_argument() -> None:
     n = Notification(message="m")
+    extra: dict[str, Any] = {"data": {"tts_text": "x"}}
     with pytest.raises(TypeError):
-        render(  # type: ignore[call-arg]
-            n,
-            max_chars=1000,
-            default_group=None,
-            level_prefix=PREFIX,
-            data={"tts_text": "x"},
-        )
+        render(n, max_chars=1000, default_group=None, level_prefix=PREFIX, **extra)
 
 
 ALLOWED = ["url", "clickAction", "tag", "group"]
