@@ -288,6 +288,13 @@ class FakeGateway:
             return SourceResult(scripted[:max_bytes], "too_large")
         return SourceResult(scripted, "ok")
 
+    # Config files (delegate to the real code, on files the test writes)
+    def read_config(self, path: str, max_bytes: int) -> bytes | None:
+        return self._real.read_config(path, max_bytes)
+
+    def list_config_dir(self, path: str) -> list[str]:
+        return self._real.list_config_dir(path)
+
     # State directory (delegates to the real code, on whatever home the test passes)
     def open_state_dir(self, home: str) -> int:
         if self.state_error is not None:
