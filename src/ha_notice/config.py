@@ -104,7 +104,7 @@ PREFIX_MAX = 16
 
 class ConfigError(Exception):
     """The config cannot be used. ``key`` is the ``details.key`` of the ``config_invalid`` error
-    (a plain key name or ``?``, ``home``, ``--config`` or a file path); ``error`` is the
+    (a known key name, ``?``, ``home``, ``--config`` or a file path); ``error`` is the
     ready-made result (exit 2). The message is fixed."""
 
     def __init__(self, key: str) -> None:

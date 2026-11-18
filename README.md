@@ -162,7 +162,7 @@ This is [config.example.yaml](config.example.yaml), with every key at its defaul
 # XDG_CONFIG_HOME are not read), plus config.d/*.yaml beside it in lexical order; --config <path> reads another file (drop-ins are read next to it).
 # Drop-ins: maps merge. Files are at most 64 KiB; unknown keys are refused.
 # Precedence: flags, then config, then defaults. There are no environment overrides.
-# Schema: schemas/config.json. Invalid config exits 2 (config_invalid), naming the key.
+# Schema: schemas/config.json. Invalid config exits 2 (config_invalid), naming the key (`?` for an unknown key).
 # Durations: a number of seconds, or a string such as "10s" or "1m" (no unit means seconds).
 
 # false makes `send` print {"outcome": "disabled"} and exit 22 without reading input or the token.

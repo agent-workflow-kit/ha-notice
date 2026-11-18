@@ -43,6 +43,9 @@ def dq(text: str) -> str:
 def home(tmp_path: Path) -> Path:
     path = Path(private_home(tmp_path))
     (path / ".config" / "ha-notice" / "config.d").mkdir(parents=True)
+    state = path / ".local" / "state" / "ha-notice"
+    state.mkdir(parents=True)
+    (state / "earlier.log").write_text("an earlier run\n", encoding="utf-8")
     return path
 
 
@@ -57,25 +60,26 @@ def fail(home: Path) -> ConfigError:
 
 
 def tree_text(home: Path) -> bytes:
-    """Every byte under the home (config files excluded): the state directory and its log."""
+    """Every byte under the home outside ``.config`` (paths taken relative to the home, so a
+    ``.config`` in the temp path cannot hide everything). The fixture seeds the state directory
+    with a file, so the scan is never empty; a ``config_invalid`` run writes no log of its own."""
     chunks = []
     for path in home.rglob("*"):
-        if path.is_file() and ".config" not in path.parts:
+        if path.is_file() and ".config" not in path.relative_to(home).parts:
             chunks.append(path.read_bytes())
     return b"".join(chunks)
 
 
+def test_the_tree_scan_reads_the_state_directory_and_sees_a_leak(home: Path) -> None:
+    assert b"an earlier run" in tree_text(home)
+    (home / ".local" / "state" / "ha-notice" / "leak.log").write_text(FAKE, encoding="utf-8")
+    assert FAKE.encode() in tree_text(home)
+
+
 # --- the key never reaches a result ----------------------------------------------------------
 
-HOSTILE = [
-    pytest.param(FAKE, id="token-shaped"),
-    pytest.param("k" * 5000, id="5000-chars"),
-    pytest.param("a" * 64, id="64-chars"),
-    pytest.param("x_ünï", id="unicode"),
-]
 
-
-@pytest.mark.parametrize("name", [n for n in (FAKE, "k" * 64, "plain_unknown", "level")])
+@pytest.mark.parametrize("name", (FAKE, "k" * 64, "plain_unknown", "level"))
 def test_an_unknown_key_is_a_question_mark(home: Path, name: str) -> None:
     main_file(home).write_text(f"{BASE}{name}: 1\n", encoding="utf-8")
     err = fail(home)
