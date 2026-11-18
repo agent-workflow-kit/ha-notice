@@ -513,3 +513,48 @@ def test_real_process_dry_run_reads_no_home_and_no_token(tmp_path: Path) -> None
     assert b"sentinel-token-value" not in proc.stdout + proc.stderr
     assert schema_errors("cli/send", json.loads(proc.stdout)) == []
     assert list(home.iterdir()) == []
+
+
+# --- notification actions (issue #37) -------------------------------------------------------
+
+ACTIONS_JSON = (
+    b'{"message":"m","actions":[{"title":"Open","uri":"HTTPS://ha.example/a"},'
+    b'{"title":"Docs","uri":"http://docs.ha.example:8080/d"}]}'
+)
+
+
+def test_dry_run_shows_the_actions(run: Any, conf: Any) -> None:
+    gw = SpyGateway(sources={0: ACTIONS_JSON})
+    code, out, err = run(["--json", "--config", conf("enabled: true\n"), "send", "--dry-run"], gw)
+    assert (code, err) == (0, "")
+    doc = json.loads(out)
+    assert schema_errors("cli/send", doc) == []
+    assert doc["rendered"]["data"]["actions"] == [
+        {"action": "URI", "title": "Open", "uri": "https://ha.example/a"},
+        {"action": "URI", "title": "Docs", "uri": "http://docs.ha.example:8080/d"},
+    ]
+    assert doc["bytes"] == len(serialize(doc["rendered"]))
+
+
+def test_actions_follow_config_link_hosts_and_pointer(run: Any, conf: Any) -> None:
+    gw = SpyGateway(sources={0: ACTIONS_JSON})
+    cfg = conf("link_hosts: [other.example]\n")
+    code, out, _ = run(["--json", "--config", cfg, "send", "--dry-run"], gw)
+    err = _error(out)
+    assert code == 20 and err["reason"] == "link_invalid"
+    assert err["details"] == {"pointer": "/actions/0/uri"}
+
+
+def test_there_is_no_actions_flag(run: Any, conf: Any) -> None:
+    cfg = conf("enabled: true\n")
+    for flag in ("--action=a|https://ha.example", "--actions=x"):
+        code, out, _ = run(["--json", "--config", cfg, "send", "--dry-run", "--message=m", flag])
+        assert code == 2 and _error(out)["code"] == "usage"
+
+
+def test_actions_with_a_flag_source_are_a_flag_combination_error(run: Any, conf: Any) -> None:
+    gw = SpyGateway(sources={0: ACTIONS_JSON})
+    code, out, _ = run(
+        ["--json", "--config", conf("enabled: true\n"), "send", "--stdin-json", "--message=m"], gw
+    )
+    assert code == 2 and _error(out)["code"] == "usage"

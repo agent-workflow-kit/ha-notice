@@ -130,7 +130,7 @@ What each exit means for the caller (the full table is in the [interface](interf
 |---|---|---|
 | 0 | Sent, or a dry run. | Nothing. |
 | 22 | Disabled in the config; nothing sent. | Treat as success. |
-| 20 | The payload was refused; nothing sent. | Do not retry the same payload; fix it and surface once. After `link_invalid` or `link_scheme` you may retry once without `link`, putting the URL in the message. After `command_keyword` you may retry once with the text prefixed by its source and a colon (a message with a second word is never a command). |
+| 20 | The payload was refused; nothing sent. | Do not retry the same payload; fix it and surface once. After `link_invalid` or `link_scheme` you may retry once without `link` (no pointer, or pointer `/link`) or without the action named by the pointer `/actions/<i>/uri`, putting the URL in the message. After `command_keyword` you may retry once with the text prefixed by its source and a colon (a message with a second word is never a command). |
 | 12 | Failed. Read `retryable` and `unknown_outcome`. | See below. |
 | 2 | Usage or config fault. | Never retry; a person fixes the deployment. |
 | 1 | Internal error. With no envelope the outcome is unknown. | Never blind-retry. |

@@ -343,7 +343,7 @@ def test_render_accepts_no_data_argument() -> None:
         render(n, max_chars=1000, default_group=None, level_prefix=PREFIX, **extra)
 
 
-ALLOWED = ["url", "clickAction", "tag", "group"]
+ALLOWED = ["url", "clickAction", "tag", "group", "actions"]
 FORBIDDEN = ["tts_text", "media_stream", "command", "clear_notification"]
 
 
@@ -358,6 +358,15 @@ def test_data_allowlist_fuzz() -> None:
         obj["level"] = rng.choice(["info", "warn", "action", "error"])
         if rng.random() < 0.5:
             obj["link"] = rng.choice(["HTTPS://a.example/x", "http://b.example:80/?q=1#f"])
+        if rng.random() < 0.5:
+            obj["actions"] = [
+                {
+                    "title": "".join(rng.choice(alphabet) for _ in range(rng.randrange(1, 10)))
+                    + "t",
+                    "uri": rng.choice(["HTTPS://a.example/x", "http://b.example:80/?q=1#f"]),
+                }
+                for _ in range(rng.randrange(0, 4))
+            ]
         n = validate_notification(obj)
         out = render(
             n,

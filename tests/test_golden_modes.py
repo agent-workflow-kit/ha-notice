@@ -115,6 +115,27 @@ SEND: tuple[Scenario, ...] = (
         config=BASE + "default_group: ops\n",
         env={},
     ),
+    Scenario(
+        "sent-actions",
+        0,
+        "cli/send",
+        "send-sent-actions.json",
+        argv=("--stdin-json", "--dedupe-key=k1"),
+        config=BASE + "default_group: ops\n",
+        source=json.dumps(
+            {
+                "title": "Deploy",
+                "message": "Deploy finished",
+                "level": "info",
+                "actions": [
+                    {"title": "Open dashboard", "uri": "HTTPS://ha.example/lovelace/0?x=1#y"},
+                    {"title": "Logs é😀", "uri": "http://logs.example:8080/run/1"},
+                ],
+            }
+        ).encode(),
+        logs_unchecked=True,
+        request="actions.json",
+    ),
     Scenario("disabled", 22, "cli/send", "disabled.json", config=BASE + "enabled: false\n"),
     Scenario(
         "config-invalid",
@@ -164,6 +185,34 @@ SEND: tuple[Scenario, ...] = (
         "error-refused-link-scheme.json",
         argv=("--message=hi", "--link=javascript:x"),
         log="send-refused-link-scheme.jsonl",
+    ),
+    Scenario(
+        "refused-action-scheme",
+        20,
+        "cli/error",
+        "error-refused-action-scheme.json",
+        argv=("--stdin-json",),
+        source=b'{"message":"hi","actions":[{"title":"t","uri":"https://a.example"},'
+        b'{"title":"t","uri":"app://x"}]}',
+        logs_unchecked=True,
+    ),
+    Scenario(
+        "refused-action-link-invalid",
+        20,
+        "cli/error",
+        "error-refused-action-link-invalid.json",
+        argv=("--stdin-json",),
+        source=b'{"message":"hi","actions":[{"title":"t","uri":"https://u@a.example/"}]}',
+        logs_unchecked=True,
+    ),
+    Scenario(
+        "refused-actions-count",
+        20,
+        "cli/error",
+        "error-refused-actions-count.json",
+        argv=("--stdin-json",),
+        source=b'{"message":"hi","actions":[1,2,3,4]}',
+        logs_unchecked=True,
     ),
     Scenario(
         "refused-invalid-payload",

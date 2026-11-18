@@ -209,6 +209,42 @@
           "http_status": 200
         }
       }
+    },
+    "link_invalid_action_uri_pointer": {
+      "error": {
+        "code": "refused",
+        "message": "m",
+        "reason": "link_invalid",
+        "details": {
+          "pointer": "/actions/2/uri"
+        },
+        "retryable": null,
+        "unknown_outcome": null
+      }
+    },
+    "link_scheme_action_uri_pointer": {
+      "error": {
+        "code": "refused",
+        "message": "m",
+        "reason": "link_scheme",
+        "details": {
+          "pointer": "/actions/0/uri"
+        },
+        "retryable": null,
+        "unknown_outcome": null
+      }
+    },
+    "invalid_payload_action_pointer": {
+      "error": {
+        "code": "refused",
+        "message": "m",
+        "reason": "invalid_payload",
+        "details": {
+          "pointer": "/actions/1/title"
+        },
+        "retryable": null,
+        "unknown_outcome": null
+      }
     }
   },
   "invalid": {
@@ -619,7 +655,7 @@
         "details",
         "pointer"
       ],
-      "keyword": "const"
+      "keyword": "pattern"
     },
     "link_invalid_empty_pointer": {
       "instance": {
@@ -639,7 +675,7 @@
         "details",
         "pointer"
       ],
-      "keyword": "const"
+      "keyword": "pattern"
     },
     "link_invalid_empty_details": {
       "instance": {
@@ -722,6 +758,46 @@
         "error"
       ],
       "keyword": "required"
+    },
+    "link_scheme_link_pointer": {
+      "instance": {
+        "error": {
+          "code": "refused",
+          "message": "m",
+          "reason": "link_scheme",
+          "details": {
+            "pointer": "/link"
+          },
+          "retryable": null,
+          "unknown_outcome": null
+        }
+      },
+      "path": [
+        "error",
+        "details",
+        "pointer"
+      ],
+      "keyword": "pattern"
+    },
+    "link_invalid_action_index_pointer": {
+      "instance": {
+        "error": {
+          "code": "refused",
+          "message": "m",
+          "reason": "link_invalid",
+          "details": {
+            "pointer": "/actions/3/uri"
+          },
+          "retryable": null,
+          "unknown_outcome": null
+        }
+      },
+      "path": [
+        "error",
+        "details",
+        "pointer"
+      ],
+      "keyword": "pattern"
     }
   }
 }

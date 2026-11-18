@@ -55,7 +55,6 @@ def test_an_empty_listing_misses_everything_except_the_allowlist() -> None:
     [
         ("output", "error-host-rejected.json", "error:host_rejected"),
         ("output", "error-host-rejected.json", "details:hint"),
-        ("output", "error-refused-link-scheme.json", "refusal:link_scheme"),
         ("output", "error-credential-invalid.json", "details:env"),
         ("output", "error-unavailable.json", "details:phase"),
         ("output", "error-network-error-tls.json", "variant:network_error:tls"),
@@ -80,10 +79,20 @@ def test_an_empty_listing_misses_everything_except_the_allowlist() -> None:
         ),
         ("request", "level_action.json", "request:level:action"),
         ("request", "title_cut.json", "request:title-cut"),
+        ("request", "actions.json", "request:data:actions"),
     ],
 )
 def test_removing_a_golden_names_what_is_lost(kind: str, name: str, lost: str) -> None:
     assert lost in gc.missing(_without(kind, name))
+
+
+def test_the_link_scheme_refusal_needs_both_goldens_that_show_it_to_be_lost() -> None:
+    first, second = "error-refused-link-scheme.json", "error-refused-action-scheme.json"
+    both = _without("output", first)
+    del both["output"][second]
+    assert "refusal:link_scheme" in gc.missing(both)
+    assert "refusal:link_scheme" not in gc.missing(_without("output", first))
+    assert "refusal:link_scheme" not in gc.missing(_without("output", second))
 
 
 def _all_files() -> list[Any]:

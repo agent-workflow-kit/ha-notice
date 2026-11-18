@@ -1,0 +1,1 @@
+{"error":{"code":"refused","message":"the link scheme is not http or https","reason":"link_scheme","details":{"pointer":"/actions/1/uri"},"retryable":null,"retry_after_s":null,"unknown_outcome":null}}

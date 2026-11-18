@@ -85,7 +85,7 @@
     },
     "error_details": {
       "type": "object",
-      "description": "Fixed strings and numbers only, never an input value. By code or reason: config_invalid -> key (a known key name, ? for an unknown key, --config, home when the home directory lookup failed, or a file path); reason invalid_payload -> pointer (may be the empty string); reason link_invalid from link_hosts -> pointer /link (the other link failures have null details); credential_invalid -> env; unavailable -> phase (always input); every code that came from an HTTP status (auth_required, host_rejected, rate_limited, upstream_error, wrong_host_response) -> http_status, except a wrong_host_response with unknown_outcome true, whose answer was not HTTP or carried a status outside 100 to 599 or a non-final 1xx (details null; with unknown_outcome true the details are null or carry http_status, nothing else); host_rejected also hint; network_error -> tls, timeout.",
+      "description": "Fixed strings and numbers only, never an input value. By code or reason: config_invalid -> key (a known key name, ? for an unknown key, --config, home when the home directory lookup failed, or a file path); reason invalid_payload -> pointer (may be the empty string); reason link_invalid from link_hosts -> pointer /link (the other link failures have null details); reason link_invalid or link_scheme for an action uri -> pointer /actions/<i>/uri; credential_invalid -> env; unavailable -> phase (always input); every code that came from an HTTP status (auth_required, host_rejected, rate_limited, upstream_error, wrong_host_response) -> http_status, except a wrong_host_response with unknown_outcome true, whose answer was not HTTP or carried a status outside 100 to 599 or a non-final 1xx (details null; with unknown_outcome true the details are null or carry http_status, nothing else); host_rejected also hint; network_error -> tls, timeout.",
       "properties": {
         "key": {
           "type": "string",
@@ -93,9 +93,9 @@
         },
         "pointer": {
           "type": "string",
-          "maxLength": 66,
-          "pattern": "^(?:|/(?:[A-Za-z0-9_-]{1,64}|\\?))(?![\\s\\S])",
-          "description": "JSON pointer into the input: empty, /<field> or /? for a field name outside [A-Za-z0-9_-]{1,64}."
+          "maxLength": 80,
+          "pattern": "^(?:|/(?:[A-Za-z0-9_-]{1,64}|\\?)|/actions/[0-2](?:/(?:[A-Za-z0-9_-]{1,64}|\\?))?)(?![\\s\\S])",
+          "description": "JSON pointer into the input: empty, /<field> or /? for a field name outside [A-Za-z0-9_-]{1,64}; for an action, /actions/<i> or /actions/<i>/<name> with i from 0 to 2 (and /? for a name outside the plain form)."
         },
         "env": {
           "type": "string",
@@ -640,7 +640,41 @@
                     ],
                     "properties": {
                       "pointer": {
-                        "const": "/link"
+                        "pattern": "^(?:/link|/actions/[0-2]/uri)(?![\\s\\S])"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "link_scheme"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "properties": {
+              "details": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "pointer"
+                    ],
+                    "properties": {
+                      "pointer": {
+                        "pattern": "^/actions/[0-2]/uri(?![\\s\\S])"
                       }
                     }
                   }
