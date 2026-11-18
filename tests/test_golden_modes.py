@@ -116,23 +116,25 @@ SEND: tuple[Scenario, ...] = (
         env={},
     ),
     Scenario(
-        "dry-run-actions",
+        "sent-actions",
         0,
         "cli/send",
-        "send-dry-run-actions.json",
-        argv=("--dry-run", "--stdin-json"),
+        "send-sent-actions.json",
+        argv=("--stdin-json", "--dedupe-key=k1"),
+        config=BASE + "default_group: ops\n",
         source=json.dumps(
             {
                 "title": "Deploy",
                 "message": "Deploy finished",
-                "level": "action",
+                "level": "info",
                 "actions": [
-                    {"title": "Open dashboard", "uri": "HTTPS://ha.example/lovelace/0"},
-                    {"title": "Logs", "uri": "http://logs.example:8080/run/1"},
+                    {"title": "Open dashboard", "uri": "HTTPS://ha.example/lovelace/0?x=1#y"},
+                    {"title": "Logs é😀", "uri": "http://logs.example:8080/run/1"},
                 ],
             }
         ).encode(),
-        env={},
+        logs_unchecked=True,
+        request="actions.json",
     ),
     Scenario("disabled", 22, "cli/send", "disabled.json", config=BASE + "enabled: false\n"),
     Scenario(

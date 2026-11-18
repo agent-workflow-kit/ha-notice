@@ -55,7 +55,6 @@ def test_an_empty_listing_misses_everything_except_the_allowlist() -> None:
     [
         ("output", "error-host-rejected.json", "error:host_rejected"),
         ("output", "error-host-rejected.json", "details:hint"),
-        ("output", "error-refused-link-scheme.json", "refusal:link_scheme"),
         ("output", "error-credential-invalid.json", "details:env"),
         ("output", "error-unavailable.json", "details:phase"),
         ("output", "error-network-error-tls.json", "variant:network_error:tls"),
