@@ -34,6 +34,11 @@ EXIT_REFUSED = 20
 EXIT_DISABLED = 22  # not an error: nothing was sent because the config disables the tool
 # 128 + N (129 SIGHUP, 130 SIGINT, 143 SIGTERM) is exit 128+N, no envelope: signals.py.
 
+# The fixed stderr line of `allow_insecure_http` on every real request (--quiet keeps it).
+INSECURE_HTTP_WARNING = (
+    "warning: insecure_http: base_url is plain http, the token travels in cleartext"
+)
+
 # Exits 10, 11, 13 and 21 are never used (docs/interface.md, Exit codes).
 EXIT_CODES: dict[str, int] = {
     "usage": EXIT_USAGE,
@@ -387,9 +392,8 @@ def emitted_exit() -> int | None:
 def record_emitted(exit_code: int) -> None:
     """Note that this invocation has printed its envelope (first call wins).
 
-    TODO(#27): every remaining success printer (the sent object and the probe) must call
-    record_emitted(0) so a later exception cannot produce a second envelope. The dry run
-    already does.
+    Every success printer calls ``record_emitted(0)`` so that a later exception cannot produce a
+    second envelope: the dry run and the sent object do. TODO(#28): the probe must too.
     """
     if not _emitted:
         _emitted.append(exit_code)

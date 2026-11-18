@@ -61,7 +61,7 @@
         ]
       },
       "uniqueItems": true,
-      "description": "Fixed strings; [] when none. The only value in 0.x is insecure_http."
+      "description": "Fixed strings; [] when none. The only value in 0.x is insecure_http, which goes with the stderr line `warning: insecure_http: base_url is plain http, the token travels in cleartext` (once per run, before the first request)."
     },
     "rendered": {
       "type": "object",

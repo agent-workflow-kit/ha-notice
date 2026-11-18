@@ -54,6 +54,7 @@
       ]
     },
     "level": {
+      "description": "Null when no valid level was read, and for every refusal (exit 20) and input timeout of a real send (the request was not built), even if a level had been read.",
       "oneOf": [
         {
           "$ref": "defs.json#/$defs/level"

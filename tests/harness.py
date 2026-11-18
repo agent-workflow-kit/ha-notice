@@ -16,7 +16,8 @@ Usage-error goldens (#6) live in tests/golden/output/usage-*.json; the version l
 golden because the release job bumps the version (tests/test_cli.py compares with pyproject).
 Goldens of the error envelope and of the disabled outcome (#7) are
 tests/golden/output/error-*.json and disabled.json.
-TODO(#27): golden files for send output. TODO(#28): golden files for validate output.
+Golden files of the sent output are tests/golden/output/send-sent*.json.
+TODO(#28): golden files for validate output.
 """
 
 from __future__ import annotations

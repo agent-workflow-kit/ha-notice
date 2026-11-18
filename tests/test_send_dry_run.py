@@ -238,11 +238,13 @@ def test_real_send_missing_service_then_ca_file(run: Any, conf: Any) -> None:
     assert _error(out)["details"] == {"key": "ca_file"} and gw.reads == []
 
 
-def test_real_send_is_still_a_stub(run: Any, conf: Any) -> None:
-    # TODO(#27): the delivery replaces this.
+def test_real_send_without_a_token_is_credential_invalid(run: Any, conf: Any) -> None:
     cfg = conf("base_url: https://ha.example\nservice: mobile_app_x\n")
     code, out, _ = run(["--json", "--config", cfg, "send", "--message=a"])
-    assert code == 1 and _error(out)["code"] == "internal"
+    err = _error(out)
+    assert (
+        code == 12 and err["code"] == "credential_invalid" and err["details"] == {"env": "HA_TOKEN"}
+    )
 
 
 @pytest.mark.parametrize("dry", [[], ["--dry-run"]])

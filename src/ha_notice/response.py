@@ -191,7 +191,9 @@ def classify_exception(exc: BaseException, gate: Gate, *, op: Op) -> ErrorSpec:
     Deadline paragraph of docs/interface.md decide what those do. If one is passed anyway it maps
     to ``internal``. The routing is owned by #25 and #27.
     """
-    # todo(#27): route KeyboardInterrupt and SystemExit before this call (signal handling).
+    # send.py never passes KeyboardInterrupt or SystemExit here: ``run_attempts`` lets a
+    # BaseException propagate to the worker, which hands it over as ``internal``, and the signal
+    # handlers are flag-only, so a signal is the stop path and not an exception.
     if not isinstance(gate, Gate):
         raise TypeError("gate must be a Gate")
     if not isinstance(op, Op):

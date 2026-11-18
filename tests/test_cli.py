@@ -588,7 +588,7 @@ def test_env_defaults_to_the_process_environment(monkeypatch: pytest.MonkeyPatch
 
 
 def test_commands_not_yet_implemented_fail_closed_as_internal(run: Any) -> None:
-    # TODO(#27) send flow and TODO(#28) validate replace these stubs; until then they must never
+    # TODO(#28) the validate command replaces this stub; until then it must never
     # report success.
     code, out, err = run(["--json", "validate"])
     assert code == 1

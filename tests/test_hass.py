@@ -406,7 +406,6 @@ def test_an_interim_100_continue_is_followed_by_the_real_answer() -> None:
         response = send_once(RealGateway(), target_for(ha), SERVICE, BODY)
     assert (response.status, response.body) == (200, b"[]")
     assert ha.requests[0].header("Expect") is None  # we never ask for it
-    # TODO(#25): an endless run of 100 responses is ended by the deadline, not here.
 
 
 @pytest.mark.parametrize("name", sorted(EDGE_ROWS))

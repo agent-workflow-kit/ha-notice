@@ -12,8 +12,20 @@ from typing import Any
 import pytest
 
 from ha_notice.cli import main
-from ha_notice.gateway import ConnectSpec, HomeLookupError, SourceError, build_tls_context
-from tests.fake_gateway import ConnectionScript, FakeExit, FakeGateway, StallingSource
+from ha_notice.gateway import (
+    ConnectSpec,
+    HomeLookupError,
+    SourceError,
+    StateDirError,
+    build_tls_context,
+)
+from tests.fake_gateway import (
+    UNSET_HOME,
+    ConnectionScript,
+    FakeExit,
+    FakeGateway,
+    StallingSource,
+)
 
 SPEC = ConnectSpec(
     "https", "ha.example", 8123, connect_timeout=3.0, io_timeout=10.0, tls=build_tls_context([])
@@ -234,3 +246,11 @@ def test_state_file_truncate_matches_the_real_gateway(tmp_path: Path) -> None:
     finally:
         g.close_fd(fd)
         g.close_fd(dir_fd)
+
+
+def test_the_default_home_is_refused_without_touching_the_filesystem() -> None:
+    g = FakeGateway()
+    assert g.home == UNSET_HOME
+    with pytest.raises(StateDirError):
+        g.open_state_dir(g.home_dir())
+    assert not Path(UNSET_HOME).exists()
