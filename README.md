@@ -150,7 +150,7 @@ credential: failed: credential_invalid: the token variable (HA_TOKEN) is missing
 
 ## Configuration
 
-The config file is `.config/ha-notice/config.yaml` under your home directory, plus `config.d/*.yaml` beside it in lexical order (maps merge). Files are at most 64 KiB, unknown keys are refused, and an invalid config exits 2 `config_invalid` naming the key. Precedence is flags, then config, then defaults; there are no environment overrides. The schema is [schemas/config.json](schemas/config.json) and every key is documented in the [Config](docs/interface.md#config) table.
+The config file is `.config/ha-notice/config.yaml` under your home directory, plus `config.d/*.yaml` beside it in lexical order (maps merge). Files are at most 64 KiB, unknown keys are refused, and an invalid config exits 2 `config_invalid` naming the key (an unknown key is reported as `?`, never by name). Precedence is flags, then config, then defaults; there are no environment overrides. The schema is [schemas/config.json](schemas/config.json) and every key is documented in the [Config](docs/interface.md#config) table.
 
 This is [config.example.yaml](config.example.yaml), with every key at its default except the two required ones, which are commented out:
 
