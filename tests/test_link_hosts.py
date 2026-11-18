@@ -103,7 +103,23 @@ def test_bad_entry_is_config_invalid_naming_the_key(
     with pytest.raises(ConfigError) as info:
         load(gw)
     assert info.value.key == "link_hosts"
-    assert "example" not in repr(info.value.error.envelope)
+    shown = repr(info.value.error.envelope)
+    assert "example.org" not in shown
+    if len(entry) >= 8:  # shorter ones can collide with envelope words ("com", "::1")
+        assert entry not in shown
+
+
+@pytest.mark.parametrize(
+    "marker", ["zz-marker-Q9", "zz-marker-Q9.", "ZZ-marker-Q9.com", "zz_Q9.com"]
+)
+def test_a_bad_entry_with_a_unique_marker_is_never_echoed(
+    gw: FakeGateway, home: Path, marker: str
+) -> None:
+    write(home, yaml_list(["example.org", marker]))
+    with pytest.raises(ConfigError) as info:
+        load(gw)
+    assert info.value.key == "link_hosts"
+    assert "Q9" not in repr(info.value.error.envelope)
 
 
 def test_unset_is_none(gw: FakeGateway) -> None:
@@ -152,7 +168,16 @@ def test_the_accessor_is_a_tuple_so_a_caller_cannot_grow_the_allowed_list(
     gw: FakeGateway, home: Path
 ) -> None:
     write(home, yaml_list(["a.example.com"]))
-    assert isinstance(load(gw).link_hosts, tuple)
+    cfg = load(gw)
+    before = repr(cfg.values["link_hosts"])
+    hosts = cfg.link_hosts
+    assert isinstance(hosts, tuple)
+    with pytest.raises(TypeError):
+        hosts[0] = "evil.com"  # type: ignore[index]
+    grown = list(hosts) + ["evil.com"]
+    assert grown[-1] == "evil.com"
+    assert cfg.link_hosts == ("a.example.com",)
+    assert repr(cfg.values["link_hosts"]) == before
 
 
 def test_entry_grammar_agrees_with_the_schema_pattern() -> None:
@@ -181,6 +206,9 @@ MATCH = [
     ("https://example.com:1/", ["example.com"], True),
     ("https://xn--bcher-kva.example/", ["xn--bcher-kva.example"], True),
     ("https://1.2.3.4/", ["1.2.3.4"], True),
+    # Plain suffix test on the host text: a numeric entry matches IPv4 hosts ending in it.
+    ("https://9.1.2.3.4/", ["1.2.3.4"], True),
+    ("https://127.0.0.1/", ["0.1"], True),
     ("https://evil-example.com/", ["example.com"], False),
     ("https://evilexample.com/", ["example.com"], False),
     ("https://example.com.evil/", ["example.com"], False),
