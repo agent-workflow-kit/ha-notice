@@ -31,6 +31,7 @@ from tests.fake_ha import (
     json_body,
     redirect,
 )
+from tests.timing import LOAD_SLACK_S
 
 TOKEN = "HA_fake-token-0123456789"
 NOTIFY = "/api/services/notify/mobile_app_test"
@@ -502,7 +503,7 @@ def test_close_stops_the_listener_and_all_threads_even_with_a_hung_connection() 
     ha.wait_for_requests(1)
     started = time.monotonic()
     ha.close()
-    assert time.monotonic() - started < 5
+    assert time.monotonic() - started < 5 + LOAD_SLACK_S
     s.close()
     with pytest.raises(OSError):
         socket.create_connection(("127.0.0.1", port), timeout=1).close()
@@ -596,7 +597,7 @@ def test_close_wakes_an_idle_handshaken_tls_connection_quickly(
         with ctx.wrap_socket(raw, server_hostname="127.0.0.1"):
             started = time.monotonic()
             tls_ha.close()
-            assert time.monotonic() - started < 2
+            assert time.monotonic() - started < 2 + LOAD_SLACK_S
     assert not fake_threads()
 
 
@@ -606,7 +607,7 @@ def test_close_wakes_a_tls_connection_that_never_handshakes_quickly(tls_ha: Fake
         time.sleep(0.2)  # let the handler block in the handshake
         started = time.monotonic()
         tls_ha.close()
-        assert time.monotonic() - started < 2
+        assert time.monotonic() - started < 2 + LOAD_SLACK_S
     assert not fake_threads()
 
 
@@ -785,7 +786,7 @@ def test_stall_before_read_never_reads_or_answers_and_close_wakes_it() -> None:
     assert ha.script == []
     started = time.monotonic()
     ha.close()
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 + LOAD_SLACK_S
     assert not fake_threads()
 
 

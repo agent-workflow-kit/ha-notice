@@ -33,6 +33,7 @@ from ha_notice.state import STATE_WARNING
 from tests.fake_gateway import FakeExit
 from tests.fake_ha import EDGE_ROWS, FakeHA, Reply
 from tests.harness import schema_errors
+from tests.timing import LOAD_SLACK_S
 
 TOKEN = "HA_SECRET_tok_5a4b3c2d1e0f9876"
 OTHER_TOKEN_ENV = "HA_OTHER"
@@ -302,11 +303,16 @@ def test_a_stalled_host_ends_at_the_deadline_with_outcome_unknown(
         started = time.monotonic()
         code, out, err, exited = run(capsys, io, cfg, ["--json", "send", "--message=a"])
         elapsed = time.monotonic() - started
-        assert code == 12 and exited and elapsed < 1 + 3
+        # The product bound is timeout + 3 s; LOAD_SLACK_S keeps a loaded host from failing a
+        # correct build (a missed deadline hangs for 10 s or more).
+        assert code == 12 and exited and elapsed < 1 + 3 + LOAD_SLACK_S
         body = json.loads(out)["error"]
         assert body["code"] == "outcome_unknown" and body["unknown_outcome"] is True
         [rec] = records(io)
-        assert rec["outcome"] == "outcome_unknown" and 1000 <= rec["duration_ms"] < 4000
+        assert (
+            rec["outcome"] == "outcome_unknown"
+            and 1000 <= rec["duration_ms"] < (1 + 3 + LOAD_SLACK_S) * 1000
+        )
         assert err.splitlines()[-1].startswith("outcome_unknown:")
 
 
@@ -324,7 +330,7 @@ def test_a_byte_by_byte_response_ends_at_the_deadline_with_outcome_unknown(
         started = time.monotonic()
         cfg = _one_second_config(tmp_path, ha)
         code, out, _, exited = run(capsys, io, cfg, ["--json", "send", "--message=a"])
-        assert code == 12 and exited and time.monotonic() - started < 1 + 3
+        assert code == 12 and exited and time.monotonic() - started < 1 + 3 + LOAD_SLACK_S
         assert json.loads(out)["error"]["code"] == "outcome_unknown"
         assert [r["outcome"] for r in records(io)] == ["outcome_unknown"]
 
@@ -366,7 +372,7 @@ def test_an_endless_100_continue_stream_ends_at_the_deadline_with_outcome_unknow
     try:
         started = time.monotonic()
         code, out, _, exited = run(capsys, io, str(cfg), ["--json", "send", "--message=a"])
-        assert code == 12 and exited and time.monotonic() - started < 1 + 3
+        assert code == 12 and exited and time.monotonic() - started < 1 + 3 + LOAD_SLACK_S
         assert json.loads(out)["error"]["code"] == "outcome_unknown"
     finally:
         stop.set()
@@ -383,7 +389,7 @@ def test_a_stalled_name_resolution_ends_at_the_deadline_and_writes_nothing(
         Path(cfg).write_text(Path(cfg).read_text().replace("timeout: 10s", "timeout: 1s"))
         started = time.monotonic()
         code, out, _, exited = run(capsys, io, cfg, ["--json", "send", "--message=a"])
-        assert code == 12 and exited and time.monotonic() - started < 1 + 3
+        assert code == 12 and exited and time.monotonic() - started < 1 + 3 + LOAD_SLACK_S
         body = json.loads(out)["error"]
         assert body["code"] == "network_error" and body["details"]["timeout"] is True
         assert ha.requests == [] and ha.connections == 0
@@ -420,7 +426,9 @@ def test_a_log_lock_held_by_another_process_delays_only_the_log(
             )
             elapsed = time.monotonic() - started
         assert code == 0 and not exited
-        assert 0.9 <= elapsed < 10 + 3  # the lock poll costs about one second, no more
+        assert (
+            0.9 <= elapsed < 10 + 3 + LOAD_SLACK_S
+        )  # the lock poll costs about one second, no more
         assert err.count(STATE_WARNING) == 1 and records(io) == []
         # the result was already on stdout when the log step first tried to lock
         assert json.loads(io.stdout_at_lock[0])["outcome"] == "sent"

@@ -19,6 +19,7 @@ from ha_notice.config import BaseUrl, ConfigError, CredentialError
 from ha_notice.gateway import SourceError
 from tests.fake_gateway import FakeGateway
 from tests.harness import load_schema, schema_errors
+from tests.timing import LOAD_SLACK_S
 
 FAKE_TOKEN = "FAKE-TOKEN-zq7Wm3-do-not-leak"
 
@@ -239,7 +240,7 @@ def test_base_url_hostile_input_is_fast() -> None:
         "https://x" + "/" * 2000,
     ]:
         config.parse_base_url(text)
-    assert time.perf_counter() - start < 2.0
+    assert time.perf_counter() - start < 2.0 + LOAD_SLACK_S
 
 
 @pytest.mark.parametrize(

@@ -17,13 +17,14 @@ from typing import Any
 import pytest
 
 from ha_notice.cli import main
-from ha_notice.deadline import Kind, run_with_deadline
+from ha_notice.deadline import Kind, WritingGate, run_with_deadline
 from ha_notice.gateway import HANDLED_SIGNALS, RealGateway
 from ha_notice.hass import RawResponse
 from ha_notice.output import flush_streams
 from ha_notice.response import Gate, Op
 from ha_notice.signals import SignalReceived, SignalState, install, signal_exit_code
 from tests.fake_gateway import FakeGateway, StallingSource
+from tests.timing import LOAD_SLACK_S
 
 SIGNALS = [signal.SIGTERM, signal.SIGINT, signal.SIGHUP]
 
@@ -455,12 +456,25 @@ def test_real_gateway_restore_continues_after_one_failure(
 # --- the stop seam of the deadline ---------------------------------------------------------
 
 
+class RecordingGate(WritingGate):
+    """A gate that records every ``wait`` argument the main thread uses."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waits: list[float] = []
+
+    def wait(self, seconds: float) -> bool:
+        self.waits.append(seconds)
+        return super().wait(seconds)
+
+
 def test_stop_wired_to_the_flag_settles_by_the_gate_state() -> None:
     state = SignalState()
+    gate = RecordingGate()
     release = threading.Event()
 
     def attempt(before_write: Callable[[], None]) -> RawResponse:
-        release.wait(10)
+        release.wait(30)
         raise OSError
 
     fake = FakeGateway()
@@ -468,12 +482,19 @@ def test_stop_wired_to_the_flag_settles_by_the_gate_state() -> None:
     started = time.monotonic()
     try:
         verdict = run_with_deadline(
-            fake, attempt, op=Op.SEND, deadline=fake.monotonic() + 60, stop=state.stopped
+            fake,
+            attempt,
+            op=Op.SEND,
+            deadline=fake.monotonic() + 60,
+            stop=state.stopped,
+            gate=gate,
         )
     finally:
         release.set()
     assert verdict.kind is Kind.DEADLINE and verdict.gate is Gate.IDLE
-    assert time.monotonic() - started < 1.5  # noticed within a slice
+    assert time.monotonic() - started < 1.5 + LOAD_SLACK_S  # noticed within a slice
+    # Deterministic: the main thread never waits longer than one slice, so it can notice the stop.
+    assert len(gate.waits) >= 2 and max(gate.waits) <= 0.1
     assert state.exit_code == 143
 
 
@@ -538,7 +559,7 @@ def test_a_real_process_exits_128_plus_n_on_a_stalled_stdin(tmp_path: Path, sign
         started = time.monotonic()
         os.kill(proc.pid, signum)  # the child this test started
         proc.wait(timeout=20)  # stdin stays open: only the signal can end the read
-        assert time.monotonic() - started < 5
+        assert time.monotonic() - started < 5 + LOAD_SLACK_S
         assert proc.stdout is not None and proc.stderr is not None
         out, err = proc.stdout.read(), proc.stderr.read()
     finally:

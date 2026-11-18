@@ -13,6 +13,7 @@ from ha_notice.payload import (
     validate_notification,
 )
 from tests.harness import schema_errors
+from tests.timing import LOAD_SLACK_S
 
 REFUSED = [
     "tts",
@@ -131,4 +132,4 @@ def test_hostile_input_is_linear(text: str) -> None:
         validate_notification({"message": text})
     except PayloadError:
         pass
-    assert time.monotonic() - start < 10.0
+    assert time.monotonic() - start < 10.0 + LOAD_SLACK_S

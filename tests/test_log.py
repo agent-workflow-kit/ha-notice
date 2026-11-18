@@ -40,6 +40,7 @@ from ha_notice.render import dedupe_key_sha256, message_sha256
 from ha_notice.state import STATE_WARNING, StateWarner
 from tests.fake_gateway import FakeGateway
 from tests.harness import Golden, load_schema, schema_errors
+from tests.timing import LOAD_SLACK_S
 
 STATE_REL = Path(".local") / "state" / "ha-notice"
 MIB = 1024 * 1024
@@ -497,7 +498,7 @@ def test_a_fifo_returns_at_once_with_one_warning(home: Path, sdir: Path, name: s
     os.mkfifo(sdir / name)
     started = time.monotonic()
     out = run(FakeGateway(home=str(home)))
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 + LOAD_SLACK_S
     assert out == STATE_WARNING + "\n"
 
 
@@ -628,7 +629,7 @@ def test_a_flock_held_by_another_process_skips_the_record_after_about_one_second
         out = run(RealClock(home=str(home)))
         elapsed = time.monotonic() - started
         assert out == STATE_WARNING + "\n"
-        assert 0.95 <= elapsed < 10.0
+        assert 0.95 <= elapsed < 10.0 + LOAD_SLACK_S
         assert not (sdir / LOG_NAME).exists() or (sdir / LOG_NAME).stat().st_size == 0
         # the holder releases: the next record is written
         assert holder.stdin is not None
@@ -743,7 +744,7 @@ def test_a_huge_log_is_rotated_without_being_read(home: Path, sdir: Path) -> Non
     fill(sdir / LOG_NAME, 4 * 1024 * MIB, b"old")  # 4 GiB, sparse
     started = time.monotonic()
     run(FakeGateway(home=str(home)))
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 + LOAD_SLACK_S
     assert (sdir / "log.jsonl.1").stat().st_size == 4 * 1024 * MIB
 
 

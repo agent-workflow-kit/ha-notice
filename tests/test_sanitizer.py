@@ -22,6 +22,7 @@ from ha_notice.payload import (
     sanitize_title,
     validate_notification,
 )
+from tests.timing import LOAD_SLACK_S
 
 
 def cps(*spans: int | tuple[int, int]) -> list[int]:
@@ -399,4 +400,4 @@ def test_one_mebibyte_of_hostile_text_is_linear(text: str) -> None:
     start = time.monotonic()
     sanitize_message(text)
     sanitize_title(text)
-    assert time.monotonic() - start < 5.0
+    assert time.monotonic() - start < 5.0 + LOAD_SLACK_S

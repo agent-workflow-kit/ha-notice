@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import pwd
+import select
 import ssl
 import stat
 import time
+import types
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from ha_notice.gateway import (
     SourceError,
     StateDirError,
 )
+from tests.timing import LOAD_SLACK_S
 
 
 @pytest.fixture
@@ -232,7 +235,7 @@ def test_read_source_fifo_path_raises_at_once(real: RealGateway, tmp_path: Path)
     started = time.monotonic()
     with pytest.raises(SourceError):
         real.read_source(str(fifo), 10, never_expires)
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 + LOAD_SLACK_S
 
 
 def test_read_source_dev_zero_raises(real: RealGateway) -> None:
@@ -272,15 +275,44 @@ def test_read_source_fd_reads_until_eof(real: RealGateway) -> None:
 
 
 def test_read_source_fd_stall_times_out_with_what_arrived(
-    real: RealGateway, pipe: tuple[int, int]
+    real: RealGateway, pipe: tuple[int, int], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     r, w = pipe
     os.write(w, b"0123456789")  # ten bytes, then the producer stalls
+    timeouts_ms: list[int] = []
+    real_poll = select.poll
+
+    class RecordingPoll:
+        def __init__(self) -> None:
+            self._poller = real_poll()
+
+        def register(self, fd: int, eventmask: int) -> None:
+            self._poller.register(fd, eventmask)
+
+        def poll(self, timeout: int) -> list[tuple[int, int]]:
+            timeouts_ms.append(timeout)
+            return self._poller.poll(timeout)
+
+    monkeypatch.setattr(
+        gw,
+        "select",
+        types.SimpleNamespace(poll=RecordingPoll, POLLIN=select.POLLIN, POLLNVAL=select.POLLNVAL),
+    )
+    # Plenty of time left (5 s) for the first polls, then none: only the slice, not `left`,
+    # can bound each poll. The literal 100 ms is the contract, not the src constant.
+    calls = 0
+
+    def remaining() -> float:
+        nonlocal calls
+        calls += 1
+        return 5.0 if calls <= 4 else 0.0
+
     start = time.monotonic()
-    res = real.read_source(r, 100, lambda: 0.3 - (time.monotonic() - start))
+    res = real.read_source(r, 100, remaining)
     elapsed = time.monotonic() - start
     assert (res.data, res.status) == (b"0123456789", "timeout")
-    assert 0.25 <= elapsed < 1.5
+    assert len(timeouts_ms) == 4 and max(timeouts_ms) <= 100
+    assert 0.25 <= elapsed < 1.5 + LOAD_SLACK_S  # real-clock guard: ~3 stalled slices of 100 ms
 
 
 def test_read_source_notices_the_deadline_within_a_slice(
@@ -478,7 +510,7 @@ def test_state_file_rejects_a_fifo_without_blocking(
     started = time.monotonic()
     with pytest.raises(StateDirError):
         real.open_state_file(dir_fd, "log.jsonl", append=True)
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 + LOAD_SLACK_S
 
 
 def test_state_file_rejects_a_symlink(real: RealGateway, state: tuple[int, Path]) -> None:

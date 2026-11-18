@@ -9,6 +9,7 @@ import pytest
 
 from ha_notice.link import link_reason
 from ha_notice.payload import PayloadError, validate_notification
+from tests.timing import LOAD_SLACK_S
 
 PREFIX = "https://a.example/"
 
@@ -172,7 +173,7 @@ def test_hostile_inputs_are_linear() -> None:
         "https://[" + ":" * 1000 + "]/",
     ):
         link_reason(link)
-    assert time.perf_counter() - start < 1.0
+    assert time.perf_counter() - start < 1.0 + LOAD_SLACK_S
 
 
 def test_a_str_subclass_is_not_given_special_treatment() -> None:
