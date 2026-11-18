@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import socket
 import ssl
 import time
@@ -19,7 +20,7 @@ import pytest
 
 from ha_notice import __version__
 from ha_notice.config import Config, CredentialError, parse_base_url
-from ha_notice.gateway import CaCandidates, ConnectSpec, RealGateway
+from ha_notice.gateway import CaCandidates, ConnectSpec, GatewayError, RealGateway
 from ha_notice.hass import (
     BODY_CAP,
     Target,
@@ -33,12 +34,18 @@ from ha_notice.hass import (
     send_once,
 )
 from tests import fake_ha
+from tests.fake_gateway import FakeGateway
 from tests.fake_ha import EDGE_ROWS, FakeHA, Reply, make_self_signed_cert, redirect
 
 TOKEN = "HA_leakcheck-0123456789-ABCDEF"
 SERVICE = "mobile_app_test"
 BODY = json.dumps({"title": "café", "message": "héllo \U0001f600"}, ensure_ascii=False).encode()
 NO_CA = CaCandidates("", "", ())
+# X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT, UNABLE_TO_GET_ISSUER_CERT_LOCALLY and
+# SELF_SIGNED_CERT_IN_CHAIN
+UNTRUSTED = (18, 20, 19)
+HOST_MISMATCH = (64,)  # X509_V_ERR_IP_ADDRESS_MISMATCH (a DNS name gives 62, HOSTNAME_MISMATCH)
+EXPIRED = (10,)  # X509_V_ERR_CERT_HAS_EXPIRED
 
 
 class CaGateway(RealGateway):
@@ -247,6 +254,22 @@ def test_make_target_trims_the_token_and_uses_the_configured_timeouts(
     assert target.tls is not None
 
 
+def test_make_target_refuses_http_without_allow_insecure_http() -> None:
+    class Tripwire(CaGateway):
+        def connect(self, spec: ConnectSpec):  # noqa: ANN202
+            raise AssertionError("connected")
+
+    with FakeHA() as ha:
+        config = Config({"base_url": f"http://127.0.0.1:{ha.port}", "service": SERVICE})
+        with pytest.raises(ValueError) as info:
+            make_target(Tripwire(), config, {"HA_TOKEN": TOKEN}, io_timeout=1.0)
+        _assert_no_token(info.value)
+        flagged = Config({**config.values, "allow_insecure_http": False})
+        with pytest.raises(ValueError):
+            make_target(Tripwire(), flagged, {"HA_TOKEN": TOKEN}, io_timeout=1.0)
+    assert ha.connections == 0
+
+
 def test_make_target_for_http_builds_no_tls_context() -> None:
     config = Config(
         {"base_url": "http://ha.example", "service": SERVICE, "allow_insecure_http": True}
@@ -338,6 +361,8 @@ def test_the_token_goes_only_to_the_configured_host_and_redirects_are_not_follow
     assert all(r.header("Authorization") == f"Bearer {TOKEN}" for r in ha.requests)
 
 
+# A regression guard against moving the client to urllib or requests (they read these variables);
+# the gateway's own http.client use never consults them.
 @pytest.mark.parametrize(
     "variable", ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]
 )
@@ -395,6 +420,16 @@ def test_a_truncated_answer_raises_incomplete_read() -> None:
     with FakeHA(script=[Reply(body=b"x" * 10, declared_length=100)]) as ha:
         with pytest.raises(http.client.IncompleteRead):
             send_once(RealGateway(), target_for(ha), SERVICE, BODY)
+
+
+def test_a_close_delimited_truncated_body_is_accepted_as_complete() -> None:
+    """Pins what ``exchange`` cannot know (for #23): an answer with neither Content-Length nor
+    chunking ends when the peer closes, so a body cut short by a dropped connection is
+    indistinguishable from a complete one and is returned as is, without an error."""
+    raw = b'HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n[{"entity'
+    with FakeHA(script=[Reply(raw=raw)]) as ha:
+        response = send_once(RealGateway(), target_for(ha), SERVICE, BODY)
+    assert (response.status, response.body, response.too_large) == (200, b'[{"entity', False)
 
 
 def test_a_non_http_answer_raises_an_http_exception() -> None:
@@ -524,13 +559,138 @@ def test_an_unusable_ca_file_is_a_trust_error(
     assert str(tmp_path) not in str(info.value)
 
 
-def test_ca_file_with_non_ascii_text_is_rejected(
+NOISE = {
+    "utf8-comment": "# café ☃\n".encode(),
+    "latin1-comment": "# café\n".encode("latin-1"),
+    "bom": b"\xef\xbb\xbf",
+    "nul-and-0xff": b"\x00\xff\xfe junk \x80\n",
+}
+
+
+@pytest.mark.parametrize("noise", sorted(NOISE))
+@pytest.mark.parametrize("where", ["before", "after", "between"])
+def test_ca_file_ignores_non_ascii_text_outside_the_certificate_blocks(
+    tmp_path: Path,
+    self_signed_cert: tuple[Path, Path],
+    other_cert: tuple[Path, Path],
+    noise: str,
+    where: str,
+) -> None:
+    junk = NOISE[noise]
+    first = self_signed_cert[0].read_bytes()
+    second = other_cert[0].read_bytes()
+    body = {
+        "before": junk + first,
+        "after": first + junk,
+        "between": first + junk + second,
+    }[where]
+    path = tmp_path / "ca.pem"
+    path.write_bytes(body)
+    tls = select_trust(CaGateway(), str(path))
+    assert tls.cert_store_stats()["x509_ca"] == (2 if where == "between" else 1)
+
+
+def test_ca_file_with_noise_still_verifies_the_server(
     tmp_path: Path, self_signed_cert: tuple[Path, Path]
 ) -> None:
+    cert, key = self_signed_cert
     path = tmp_path / "ca.pem"
-    path.write_bytes("# café\n".encode() + self_signed_cert[0].read_bytes())
-    with pytest.raises(TrustError):
+    path.write_bytes("# café\n".encode() + cert.read_bytes() + b"\xff\n")
+    with FakeHA(token=TOKEN, certfile=cert, keyfile=key) as ha:
+        tls = select_trust(CaGateway(), str(path))
+        assert send_once(RealGateway(), target_for(ha, tls=tls), SERVICE, BODY).status == 200
+
+
+def _der(cert: Path) -> bytes:
+    return ssl.PEM_cert_to_DER_cert(cert.read_text())
+
+
+@pytest.mark.parametrize("shape", ["der", "truncated", "no-end", "empty", "noise-only", "trusted"])
+def test_ca_file_without_a_whole_certificate_block_is_a_trust_error(
+    tmp_path: Path, self_signed_cert: tuple[Path, Path], shape: str
+) -> None:
+    pem = self_signed_cert[0].read_text()
+    data = {
+        "der": _der(self_signed_cert[0]),
+        "truncated": pem[: len(pem) // 2].encode(),
+        "no-end": pem.replace("-----END CERTIFICATE-----", "").encode(),
+        "empty": b"",
+        "noise-only": "# café\n\xff".encode(),
+        # a block kind the library does not load as a CA bundle entry is not extracted
+        "trusted": pem.replace("CERTIFICATE", "TRUSTED CERTIFICATE").encode(),
+    }[shape]
+    path = tmp_path / "ca.pem"
+    path.write_bytes(data)
+    with pytest.raises(TrustError) as info:
         select_trust(CaGateway(), str(path))
+    assert info.value.reason == "ca_file"
+
+
+def test_a_garbled_certificate_block_in_ca_file_is_a_trust_error(tmp_path: Path) -> None:
+    path = tmp_path / "ca.pem"
+    path.write_text("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n")
+    with pytest.raises(TrustError) as info:
+        select_trust(CaGateway(), str(path))
+    assert info.value.reason == "ca_file"
+
+
+def test_a_default_bundle_with_non_ascii_comments_is_usable_as_compiled_cafile(
+    tmp_path: Path, self_signed_cert: tuple[Path, Path]
+) -> None:
+    cafile = tmp_path / "cert.pem"
+    cafile.write_bytes(
+        "## Bundle — café\n".encode() + b"\xff\xfe\n" + self_signed_cert[0].read_bytes()
+    )
+    tls = select_trust(CaGateway(CaCandidates(str(cafile), "", ())), None)
+    assert tls.cert_store_stats()["x509_ca"] == 1
+
+
+def test_a_default_bundle_with_non_ascii_comments_is_usable_as_fallback_file(
+    tmp_path: Path, self_signed_cert: tuple[Path, Path]
+) -> None:
+    fallback = tmp_path / "ca-bundle.crt"
+    fallback.write_bytes(
+        "# Zertifikate — für alle\n".encode() + self_signed_cert[0].read_bytes() + b"\x00\xff"
+    )
+    candidates = CaCandidates(str(tmp_path / "missing.pem"), "", (str(fallback),))
+    assert select_trust(CaGateway(candidates), None).cert_store_stats()["x509_ca"] == 1
+
+
+def test_a_default_bundle_that_is_der_or_noise_is_not_usable(
+    tmp_path: Path, self_signed_cert: tuple[Path, Path]
+) -> None:
+    der = tmp_path / "der.pem"
+    der.write_bytes(_der(self_signed_cert[0]))
+    noise = tmp_path / "noise.pem"
+    noise.write_bytes("café\xff".encode())
+    with pytest.raises(TrustError) as info:
+        select_trust(CaGateway(CaCandidates(str(der), "", (str(noise),))), None)
+    assert info.value.reason == "no_trust"
+
+
+def test_a_failing_default_source_is_no_trust_and_not_blamed_on_ca_file(
+    tmp_path: Path, self_signed_cert: tuple[Path, Path]
+) -> None:
+    capath = tmp_path / "certs"
+    capath.mkdir()
+    (capath / "x.pem").write_text("whatever")
+
+    class BrokenDirectory(FakeGateway):
+        def new_tls_context(self, ca_files, ca_dirs=(), ca_pems=()):  # noqa: ANN001, ANN202
+            if ca_dirs:
+                raise GatewayError("trust file cannot be loaded")
+            return super().new_tls_context(ca_files, ca_dirs, ca_pems)
+
+    gateway = BrokenDirectory(ca=CaCandidates("", str(capath), ()))
+    with pytest.raises(TrustError) as info:
+        select_trust(gateway, str(self_signed_cert[0]))  # ca_file is fine on its own
+    assert info.value.reason == "no_trust"
+    # and a bad ca_file is still blamed on ca_file, with the same broken default in place
+    bad = tmp_path / "bad.pem"
+    bad.write_text("nothing here")
+    with pytest.raises(TrustError) as info:
+        select_trust(gateway, str(bad))
+    assert info.value.reason == "ca_file"
 
 
 def test_a_self_signed_certificate_without_trust_fails_verification(
@@ -540,8 +700,9 @@ def test_a_self_signed_certificate_without_trust_fails_verification(
     default = CaCandidates(str(other_cert[0]), "", ())
     with FakeHA(token=TOKEN, certfile=cert, keyfile=key) as ha:
         tls = select_trust(CaGateway(default), None)
-        with pytest.raises(ssl.SSLCertVerificationError):
+        with pytest.raises(ssl.SSLCertVerificationError) as info:
             send_once(RealGateway(), target_for(ha, tls=tls), SERVICE, BODY)
+        assert info.value.verify_code in UNTRUSTED
     assert ha.requests == [] and ha.received in ([], [b""])  # no request bytes were sent
 
 
@@ -562,12 +723,47 @@ def test_a_certificate_for_another_name_fails_even_when_trusted(
     cert, key = other_cert
     with FakeHA(certfile=cert, keyfile=key) as ha:
         tls = select_trust(CaGateway(), str(cert))
-        with pytest.raises(ssl.SSLCertVerificationError):
+        with pytest.raises(ssl.SSLCertVerificationError) as info:
             send_once(RealGateway(), target_for(ha, tls=tls), SERVICE, BODY)
+        assert info.value.verify_code in HOST_MISMATCH
     assert ha.requests == []
 
 
-def test_tls_against_a_plain_http_server_fails_without_a_request() -> None:
+def _serve_and_send(cert: tuple[Path, Path], host: str = "127.0.0.1") -> int:
+    """Send one request to an HTTPS fake that presents ``cert`` and trusts only ``cert``."""
+    with FakeHA(token=TOKEN, certfile=cert[0], keyfile=cert[1]) as ha:
+        parsed = parse_base_url(f"https://{host}:{ha.port}")
+        assert parsed is not None
+        tls = select_trust(CaGateway(), str(cert[0]))
+        target = Target(parsed, TOKEN, "HA_TOKEN", tls, 5.0, 5.0)
+        return send_once(RealGateway(), target, SERVICE, BODY).status
+
+
+def test_a_dns_name_san_verifies_through_localhost(self_signed_cert: tuple[Path, Path]) -> None:
+    # localhost may resolve to ::1 first; the fake listens on IPv4 only and the gateway tries on.
+    assert _serve_and_send(self_signed_cert, "localhost") == 200
+
+
+def test_an_rsa_leaf_that_is_not_a_ca_with_an_ip_san_verifies(tmp_path: Path) -> None:
+    cert = make_self_signed_cert(tmp_path, name="rsa-leaf", rsa=True, is_ca=False)
+    assert _serve_and_send(cert) == 200
+
+
+def test_a_certificate_without_a_san_fails_even_when_trusted(tmp_path: Path) -> None:
+    cert = make_self_signed_cert(tmp_path, name="no-san", sans=())
+    with pytest.raises(ssl.SSLCertVerificationError) as info:
+        _serve_and_send(cert)
+    assert info.value.verify_code in HOST_MISMATCH
+
+
+def test_an_expired_certificate_fails_even_when_trusted(tmp_path: Path) -> None:
+    cert = make_self_signed_cert(tmp_path, name="expired", expired=True)
+    with pytest.raises(ssl.SSLCertVerificationError) as info:
+        _serve_and_send(cert)
+    assert info.value.verify_code in EXPIRED
+
+
+def test_tls_against_a_plain_http_server_sends_only_a_client_hello_and_no_token() -> None:
     with FakeHA() as ha:
         parsed = parse_base_url(f"https://127.0.0.1:{ha.port}")
         assert parsed is not None
@@ -576,18 +772,29 @@ def test_tls_against_a_plain_http_server_fails_without_a_request() -> None:
             send_once(
                 RealGateway(), Target(parsed, TOKEN, "HA_TOKEN", tls, 2.0, 2.0), SERVICE, BODY
             )
+        deadline = time.monotonic() + 5
+        while not any(ha.received) and time.monotonic() < deadline:
+            time.sleep(0.01)  # the server thread records the bytes a moment later
     assert ha.requests == []
+    seen = [r for r in ha.received if r]
+    assert seen, "the client sent nothing at all, so the handshake was not attempted"
+    assert all(r[:2] == b"\x16\x03" for r in seen)  # a TLS handshake record, not an HTTP request
+    assert all(TOKEN.encode() not in r and b"POST" not in r for r in seen)
 
 
-def test_plain_http_against_a_tls_server_sends_no_token_in_the_clear(
+def test_the_http_scheme_is_honoured_against_a_tls_server(
     self_signed_cert: tuple[Path, Path],
 ) -> None:
+    """``http`` against a TLS port is a configuration error of the caller: no handshake is
+    started, the server cannot parse the plain-text request and drops the connection, so the
+    attempt ends with a connection error and no request is ever answered. (The token is in that
+    plain-text request by design: ``http`` needs ``allow_insecure_http``.)"""
     cert, key = self_signed_cert
     with FakeHA(certfile=cert, keyfile=key) as ha:
         parsed = parse_base_url(f"http://127.0.0.1:{ha.port}")
         assert parsed is not None
         target = Target(parsed, TOKEN, "HA_TOKEN", None, 2.0, 2.0)
-        with pytest.raises((http.client.HTTPException, OSError)):
+        with pytest.raises(ConnectionError):
             send_once(RealGateway(), target, SERVICE, BODY)
     assert ha.requests == []
 
@@ -613,8 +820,9 @@ def test_ssl_environment_variables_are_ignored(
     default = CaCandidates(str(other_cert[0]), "", ())
     with FakeHA(certfile=cert, keyfile=key) as ha:
         tls = select_trust(CaGateway(default), None)
-        with pytest.raises(ssl.SSLCertVerificationError):
+        with pytest.raises(ssl.SSLCertVerificationError) as info:
             send_once(RealGateway(), target_for(ha, tls=tls), SERVICE, BODY)
+        assert info.value.verify_code in UNTRUSTED
         # The real gateway's own candidates are the compiled ones, never the variables.
         real = RealGateway().ca_candidates()
         assert str(cert) not in (real.cafile, real.capath)
@@ -667,8 +875,9 @@ def test_both_compiled_locations_missing_fall_back_to_the_first_usable_file(
     assert tls.cert_store_stats()["x509_ca"] == 1  # only the first usable fallback (other_cert)
     cert, key = self_signed_cert
     with FakeHA(certfile=cert, keyfile=key) as ha:
-        with pytest.raises(ssl.SSLCertVerificationError):
+        with pytest.raises(ssl.SSLCertVerificationError) as info:
             send_once(RealGateway(), target_for(ha, tls=tls), SERVICE, BODY)
+        assert info.value.verify_code in UNTRUSTED
 
 
 def test_a_usable_compiled_cafile_means_no_fallback_is_used(
@@ -691,8 +900,9 @@ def test_a_non_empty_capath_counts_as_usable_and_stops_the_fallback(
     tls = select_trust(CaGateway(candidates), None)  # no TrustError: the directory is the trust
     assert tls.cert_store_stats()["x509_ca"] == 0  # unhashed files are not found lazily
     with FakeHA(certfile=cert, keyfile=key) as ha:
-        with pytest.raises(ssl.SSLCertVerificationError):
+        with pytest.raises(ssl.SSLCertVerificationError) as info:
             send_once(RealGateway(), target_for(ha, tls=tls), SERVICE, BODY)  # tls, not retryable
+        assert info.value.verify_code in UNTRUSTED
     assert ha.requests == []
 
 
@@ -722,13 +932,17 @@ def test_the_real_gateway_default_trust_does_not_verify_the_fake(
     self_signed_cert: tuple[Path, Path],
 ) -> None:
     cert, key = self_signed_cert
+    cafile = ssl.get_default_verify_paths().openssl_cafile
     try:
         tls = select_trust(RealGateway(), None)
     except TrustError:
+        if cafile and os.path.isfile(cafile) and os.path.getsize(cafile) > 0:
+            pytest.fail("the compiled openssl_cafile exists and is not empty, yet it is not usable")
         pytest.skip("this host has no usable default trust")
     with FakeHA(certfile=cert, keyfile=key) as ha:
-        with pytest.raises(ssl.SSLCertVerificationError):
+        with pytest.raises(ssl.SSLCertVerificationError) as info:
             send_once(RealGateway(), target_for(ha, tls=tls), SERVICE, BODY)
+        assert info.value.verify_code in UNTRUSTED
 
 
 # --- the gateway's trust loaders ---------------------------------------------------------------

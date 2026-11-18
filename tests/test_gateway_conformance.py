@@ -11,10 +11,12 @@ import contextlib
 import http.client
 import inspect
 import socket
+import ssl
 import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -162,8 +164,9 @@ def closed_port() -> Iterator[int]:
         s.close()
 
 
-SCENARIOS = ["ok", "refused", "drop_after_request", "not_http", "short_body"]
+SCENARIOS = ["ok", "refused", "drop_after_request", "not_http", "short_body", "long_body"]
 SHORT_BODY = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nabcd"
+LONG_BODY = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcdef"
 
 
 @pytest.fixture(params=["real", "fake"])
@@ -178,6 +181,7 @@ def make_backend(request: pytest.FixtureRequest) -> Iterator[Any]:
                 "drop_after_request": None,
                 "not_http": b"garbage\r\n\r\n",
                 "short_body": SHORT_BODY,
+                "long_body": LONG_BODY,
             }
             if scenario == "refused":
                 port, received = stack.enter_context(closed_port()), []
@@ -194,6 +198,7 @@ def make_backend(request: pytest.FixtureRequest) -> Iterator[Any]:
             ),
             "not_http": ConnectionScript(response_error=http.client.BadStatusLine("garbage")),
             "short_body": ConnectionScript(body=b"abcd", declared_length=100),
+            "long_body": ConnectionScript(body=b"abcdef", declared_length=4),
         }[scenario]
         fake = FakeGateway()
         fake.scripts.append(script)
@@ -237,6 +242,7 @@ EXPECTED = {
     "drop_after_request": ("response:RemoteDisconnected", None),
     "not_http": ("response:BadStatusLine", None),
     "short_body": ("response:IncompleteRead", None),
+    "long_body": ("ok", (200, b"abcd")),
 }
 
 
@@ -478,6 +484,69 @@ def test_read_of_minus_one_reads_to_the_end(make_backend: Any) -> None:
         return conn.getresponse().read(-1)
 
     assert _connect_and(make_backend("ok"), act) == b"[]"
+
+
+def test_read_of_minus_one_on_a_short_body_is_incomplete_read(make_backend: Any) -> None:
+    def act(conn: Any) -> None:
+        conn.request("GET", "/api/", None, {})
+        with pytest.raises(http.client.IncompleteRead):
+            conn.getresponse().read(-1)
+
+    _connect_and(make_backend("short_body"), act)
+
+
+def test_read_of_minus_one_stops_at_the_declared_length(make_backend: Any) -> None:
+    def act(conn: Any) -> bytes:
+        conn.request("GET", "/api/", None, {})
+        return conn.getresponse().read(-1)
+
+    assert _connect_and(make_backend("long_body"), act) == b"abcd"
+
+
+# --- trust loading and directory checks, on both gateways ----------------------------------
+
+
+def test_new_tls_context_loads_pem_bytes_on_both(
+    any_gateway: Gateway, self_signed_cert: tuple[Path, Path]
+) -> None:
+    pem = self_signed_cert[0].read_bytes()
+    ctx = any_gateway.new_tls_context([], (), [pem])
+    assert ctx.cert_store_stats()["x509_ca"] == 1
+    assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
+    for bad in (b"", b"junk", "é".encode()):
+        with pytest.raises(gw.GatewayError):
+            any_gateway.new_tls_context([], (), [bad])
+
+
+def test_new_tls_context_loads_files_and_directories_on_both(
+    any_gateway: Gateway, self_signed_cert: tuple[Path, Path], tmp_path: Path
+) -> None:
+    cert = self_signed_cert[0]
+    assert any_gateway.new_tls_context([str(cert)]).cert_store_stats()["x509_ca"] == 1
+    directory = tmp_path / "certs"
+    directory.mkdir()
+    any_gateway.new_tls_context([], [str(directory)])  # a directory loads lazily: no error
+    # OpenSSL looks into a capath lazily, so even a missing directory is no load error.
+    any_gateway.new_tls_context([], [str(tmp_path / "missing")])
+    with pytest.raises(gw.GatewayError):
+        any_gateway.new_tls_context([str(tmp_path / "missing.pem")])
+    both = any_gateway.new_tls_context([str(cert)], [str(directory)], [cert.read_bytes()])
+    assert both.cert_store_stats()["x509_ca"] == 1  # the same certificate twice is stored once
+
+
+def test_has_entries_is_the_same_on_both(any_gateway: Gateway, tmp_path: Path) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    full = tmp_path / "full"
+    full.mkdir()
+    (full / ".hidden").write_text("")
+    plain = tmp_path / "plain"
+    plain.write_text("x")
+    assert not any_gateway.has_entries(str(empty))
+    assert any_gateway.has_entries(str(full))
+    assert not any_gateway.has_entries(str(plain))
+    assert not any_gateway.has_entries(str(tmp_path / "missing"))
+    assert not any_gateway.has_entries("")
 
 
 # --- connect deadline (one monotonic deadline for resolve, every address and TLS) -------------

@@ -13,13 +13,15 @@ Rules kept here (docs/interface.md, Home Assistant edge):
 - The token is validated whole before anything else happens (``Target``), is used only in the
   ``Authorization`` header and never appears in a repr, a message or an exception raised here.
 - Trust is the compiled OpenSSL locations that are usable, else the first usable fallback file,
-  plus ``ca_file``; ``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` are never consulted.
+  plus ``ca_file``; ``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` are never consulted. Of a bundle only
+  the PEM certificate blocks are used; any other text, whatever its encoding, is ignored.
 - Exceptions from ``http.client``, ``ssl`` and ``socket`` propagate unchanged (the gateway
   already replaced the ones that could echo input); the caller maps them by class only.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Literal
@@ -53,6 +55,11 @@ __all__ = [
 BODY_CAP = 64 * 1024  # a longer answer is a bad body (interface, Home Assistant edge)
 READ_CHUNK = 1024
 MAX_DEFAULT_BUNDLE_BYTES = 16 * 1024 * 1024
+# A PEM certificate block as the library's ``cadata`` loader reads it (``CERTIFICATE`` and
+# ``X509 CERTIFICATE``; a ``TRUSTED CERTIFICATE`` block is not loadable that way and is skipped).
+_CERT_BLOCK = re.compile(
+    rb"-----BEGIN (CERTIFICATE|X509 CERTIFICATE)-----[A-Za-z0-9+/=\r\n \t]*?-----END \1-----"
+)
 USER_AGENT = f"ha-notice/{__version__}"
 NOTIFY_CONTENT_TYPE = "application/json"
 
@@ -103,21 +110,31 @@ class Target:
             raise ValueError("http takes no TLS context")
 
 
+def _certificate_blocks(data: bytes) -> bytes | None:
+    """Only the PEM certificate blocks of ``data``, as ASCII, else ``None``. Text between and
+    around the blocks (comments in any encoding, a BOM, stray bytes) is dropped, as OpenSSL does
+    when it loads a bundle file."""
+    blocks = [m.group(0) for m in _CERT_BLOCK.finditer(data)]
+    return b"\n".join(blocks) + b"\n" if blocks else None
+
+
 def _usable_bundle(gateway: Gateway, path: str) -> bytes | None:
-    """The bytes of a regular file that loads at least one CA certificate, else ``None``."""
+    """The certificate blocks of a regular file that loads at least one CA certificate, else
+    ``None``."""
     if not path:
         return None
     try:
         data = gateway.read_config(path, MAX_DEFAULT_BUNDLE_BYTES)
     except SourceError:
         return None
-    if not data:
+    blocks = _certificate_blocks(data) if data else None
+    if blocks is None:
         return None
     try:
-        context = gateway.new_tls_context([], (), [data])
-    except Exception:  # GatewayError: the file does not parse; the reason is not needed
+        context = gateway.new_tls_context([], (), [blocks])
+    except Exception:  # GatewayError: the blocks do not parse; the reason is not needed
         return None
-    return data if context.cert_store_stats().get("x509_ca", 0) > 0 else None
+    return blocks if context.cert_store_stats().get("x509_ca", 0) > 0 else None
 
 
 def select_trust(gateway: Gateway, ca_file: str | None) -> SSLContext:
@@ -126,7 +143,9 @@ def select_trust(gateway: Gateway, ca_file: str | None) -> SSLContext:
     Default trust: the compiled ``openssl_cafile`` when it is a usable bundle and the compiled
     ``openssl_capath`` when it is a non-empty directory; when neither is usable, the first usable
     fallback file. ``ca_file`` is added to a non-empty default and is the whole trust otherwise.
-    Raises ``TrustError``.
+    Only the PEM certificate blocks of a file count; other text in it is ignored. Raises
+    ``TrustError``: ``ca_file`` when that file has no loadable certificate block, ``no_trust``
+    when there is nothing to trust or a default source fails to load.
     """
     candidates = gateway.ca_candidates()
     pems: list[bytes] = []
@@ -144,18 +163,23 @@ def select_trust(gateway: Gateway, ca_file: str | None) -> SSLContext:
                 break
     if ca_file is not None:
         try:
-            own = gateway.read_config(ca_file, MAX_CA_FILE_BYTES)  # the one read of the file
+            raw = gateway.read_config(ca_file, MAX_CA_FILE_BYTES)  # the one read of the file
         except SourceError:
-            own = None
+            raw = None
+        own = _certificate_blocks(raw) if raw else None
         if own is None:
             raise TrustError("ca_file")
+        try:
+            gateway.new_tls_context([], (), [own])  # on its own, so only this file is blamed
+        except Exception:  # GatewayError, fixed message
+            raise TrustError("ca_file") from None
         pems.append(own)
     if not pems and not dirs:
         raise TrustError("no_trust")
     try:
         return gateway.new_tls_context([], dirs, pems)
-    except Exception:  # GatewayError, fixed message; the file is the only thing that can fail
-        raise TrustError("ca_file" if ca_file is not None else "no_trust") from None
+    except Exception:  # GatewayError, fixed message; ca_file loaded alone above, so a default
+        raise TrustError("no_trust") from None  # source is what failed
 
 
 def make_target(
@@ -168,6 +192,8 @@ def make_target(
     base = config.base_url
     if base is None:
         raise ValueError("base_url is not valid")
+    if base.scheme == "http" and not config.allow_insecure_http:
+        raise ValueError("http needs allow_insecure_http")  # Config.load enforces it too
     token = config.read_token(env)
     tls = select_trust(gateway, config.ca_file) if base.scheme == "https" else None
     return Target(base, token, config.token_env, tls, config.connect_timeout, io_timeout)
@@ -196,8 +222,9 @@ def open_connection(gateway: Gateway, target: Target) -> Connection:
     The connection is closed again when connecting fails. TODO(#25): the writing gate is taken
     by the caller after this returns, before ``exchange``.
     """
+    scheme: Literal["http", "https"] = "https" if target.base.scheme == "https" else "http"
     spec = ConnectSpec(
-        target.base.scheme,  # pyright: ignore[reportArgumentType]
+        scheme,
         target.base.host,
         target.base.port,
         target.connect_timeout,
@@ -214,6 +241,9 @@ def open_connection(gateway: Gateway, target: Target) -> Connection:
 
 
 def _read_capped(conn: Connection) -> RawResponse:
+    # TODO(#25): bound the 100-Continue loop with the overall deadline. ``getresponse`` skips
+    # interim 1xx answers in a loop that only ``io_timeout`` per read limits, so a peer that
+    # sends 1xx lines forever is not stopped here.
     response = conn.getresponse()
     chunks: list[bytes] = []
     total = 0
@@ -241,7 +271,8 @@ def exchange(
 
     ``before_write`` runs after the headers are built and before the first call that can put a
     byte on the socket (TODO(#25): the idle-to-writing gate step; it may raise to refuse).
-    Nothing is retried and nothing is classified here (TODO(#23), TODO(#24)).
+    Nothing is retried and nothing is classified here (TODO(#23), TODO(#24)). TODO(#25): bound
+    the 100-Continue loop with the overall deadline (see ``_read_capped``).
     """
     try:
         headers = request_headers(target, body=body)
