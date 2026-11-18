@@ -60,7 +60,8 @@ def test_json_whitespace_and_escapes_accepted() -> None:
 
 
 def test_non_ascii_utf8_accepted() -> None:
-    assert parse_notification('{"message":"\u00e9\U0001f600"}'.encode()).message == "\u00e9\U0001f600"
+    text = "\u00e9\U0001f600"
+    assert parse_notification(f'{{"message":"{text}"}}'.encode()).message == text
 
 
 # --- the parse: every refusal is invalid_payload with pointer "" ------------------------------
@@ -152,8 +153,8 @@ def test_recursion_error_and_overflow_error_map_to_empty_pointer(
 ) -> None:
     for exc in (RecursionError, OverflowError, ValueError):
 
-        def boom(*_a: object, **_k: object) -> object:
-            raise exc("secret-input-text")
+        def boom(*_a: object, _exc: type[Exception] = exc, **_k: object) -> object:
+            raise _exc("secret-input-text")
 
         monkeypatch.setattr(payload.json.JSONDecoder, "decode", boom)
         with pytest.raises(PayloadError) as info:

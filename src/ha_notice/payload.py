@@ -36,7 +36,8 @@ from ha_notice.gateway import Gateway
 from ha_notice.output import ErrorResult, build_error, safe_pointer
 
 INPUT_MAX = 1048576  # bytes read from one source (1 MiB)
-INT_DIGITS_MAX = 4300  # the interpreter's own default limit; kept here so an env setting cannot lift it
+# The interpreter's default int limit, kept here so PYTHONINTMAXSTRDIGITS cannot lift it.
+INT_DIGITS_MAX = 4300
 TEXT_MAX = 100000  # characters of input for title and message
 LEVELS = ("info", "warn", "action", "error")  # ordered: info < warn < action < error
 DEFAULT_LEVEL = "info"
