@@ -510,7 +510,9 @@ def test_message_sha256_fixed_vectors() -> None:
     assert message_sha256(None, "hello") == _digest("", "hello")
     assert message_sha256(None, "hello") == "a1ad92f331dce2e0"
     assert message_sha256("t", "m") == _digest("t", "m")
+    assert message_sha256("t", "m") == "683376d4165d7388"
     assert message_sha256("Backup échoué", "Grüße 😀") == _digest("Backup échoué", "Grüße 😀")
+    assert message_sha256("Backup échoué", "Grüße 😀") == "0bf1750daef21648"
 
 
 def test_message_sha256_empty_title_equals_absent() -> None:
