@@ -23,6 +23,7 @@ Implements [interface.md](interface.md) and [design.md](design.md). The issues f
 | `payload.py` | 1 | Input parsing, validation, sanitizer, command keywords. |
 | `render.py` | 1 | Request body and `data` allowlist. |
 | `config.py` | 1 | Config from the password-database home, drop-ins, strict YAML, no environment overrides. |
+| `state.py` | 2 | Safe state directory and file opens; one fixed warning. |
 | `log.py` | 2 | Log records and rotation. |
 | `hass.py` | 3, 4 | URL building, request, response mapping, retries, deadline, probe call. |
 
