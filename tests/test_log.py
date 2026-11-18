@@ -876,8 +876,47 @@ FAILED_CODES = [
 ]
 
 
-def test_every_combination_yields_nothing_a_schema_valid_record_or_a_value_error() -> None:
-    accepted = 0
+def _expected_record(f: RunFacts) -> dict[str, Any] | None:
+    """The schema-faithful record for the facts, built without build_record's validation.
+
+    None when the run is not logged. The code/reason columns follow the interface: exit 20
+    carries code refused and the refusal reason, exit 1 carries internal, exit 12 carries the
+    host's code, exit 0 carries neither.
+    """
+    if f.exit_code == 0:
+        outcome, code, reason = "sent", None, None
+    elif f.exit_code == 20:
+        outcome, code, reason = "refused", "refused", f.reason
+    elif f.exit_code == 12:
+        outcome = "outcome_unknown" if f.unknown_outcome else "failed"
+        code, reason = f.code, None
+    elif f.exit_code == 1 and f.unknown_outcome:
+        outcome, code, reason = "outcome_unknown", "internal", None
+    else:
+        return None
+    return {
+        "ts": TS,
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": outcome,
+        "exit": f.exit_code,
+        "code": code,
+        "reason": reason,
+        "level": f.level,
+        "bytes": f.bytes,
+        "truncated": f.truncated,
+        "duration_ms": f.duration_ms,
+        "http_status": f.http_status,
+        "message_sha256": f.message_sha256,
+        "dedupe_key_sha256": f.dedupe_key_sha256,
+        "tag_set": f.tag_set,
+        "actor": f.actor,
+        "actor_source": f.actor_source,
+    }
+
+
+def test_build_record_rejects_exactly_what_the_schema_rejects() -> None:
+    accepted = rejected = 0
     for exit_code in (0, 1, 2, 12, 20, 22, 130):
         for unknown in (False, True):
             for code in [None, *ERROR_CODES]:
@@ -885,14 +924,19 @@ def test_every_combination_yields_nothing_a_schema_valid_record_or_a_value_error
                     f = facts(
                         exit_code=exit_code, unknown_outcome=unknown, code=code, reason=reason
                     )
-                    try:
-                        rec = build_record(f, ts=TS, version="0.1.0")
-                    except ValueError:
+                    expected = _expected_record(f)
+                    if expected is None:
+                        assert build_record(f, ts=TS, version="0.1.0") is None, f
                         continue
-                    if rec is not None:
-                        assert schema_errors("log", rec) == [], f
+                    if schema_errors("log", expected):
+                        rejected += 1
+                        with pytest.raises(ValueError):
+                            build_record(f, ts=TS, version="0.1.0")
+                    else:
                         accepted += 1
+                        assert build_record(f, ts=TS, version="0.1.0") == expected, f
     assert accepted > 0
+    assert rejected > 0
 
 
 @pytest.mark.parametrize(
