@@ -1,4 +1,5 @@
-"""Shared fixtures: a self-signed certificate made once per session (issue #4)."""
+"""Shared fixtures: a self-signed certificate made once per session (issue #4) and the
+golden-file harness wiring (tests/harness.py)."""
 
 from __future__ import annotations
 
@@ -9,6 +10,24 @@ from pathlib import Path
 import pytest
 
 from tests.fake_ha import make_self_signed_cert
+from tests.harness import Golden
+
+pytest_plugins = ["pytester"]  # tests/test_conftest.py runs inner pytest sessions
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--update-golden",
+        action="store_true",
+        default=False,
+        help="rewrite golden files from the actual output (never in CI; off by default)",
+    )
+
+
+@pytest.fixture
+def golden(request: pytest.FixtureRequest) -> Golden:
+    """The golden-file checker; update mode only with --update-golden, refused when CI is set."""
+    return Golden(update=bool(request.config.getoption("--update-golden")))
 
 
 @pytest.fixture(scope="session")
