@@ -34,7 +34,6 @@ import ipaddress
 import math
 import os.path
 import re
-import unicodedata
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from fractions import Fraction
