@@ -29,7 +29,7 @@ Implements [interface.md](interface.md) and [design.md](design.md). The issues f
 | `retry.py` | 3 | Retry loop (429, connect-phase), waits. |
 | `response.py` | 3 | Pure mapping of an answer or an exception (with the gate state) to a success or an error spec. |
 | `link.py` | 1 | The link rule (syntax, scheme, port, IPv6 literal). |
-| `send.py` | 3 | The `send` pipeline: config, input, validation, render, dry-run, delivery. |
+| `send.py` | 1, 3 | The `send` pipeline: config, input, validation, render, dry-run, delivery. |
 | `deadline.py` | 3 | The whole-send deadline: gate, worker thread, decision at the deadline. |
 | `signals.py` | 3 | The signal flag and its checkpoints. |
 | `validate.py` | 4 | The `validate` command: config, credential, probe and test-message checks. |
