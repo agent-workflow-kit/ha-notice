@@ -55,6 +55,10 @@ Global flags: `--json`, `--config`, `--dry-run`, `--actor`, `--verbose`, `--quie
 4. Copy [config.example.yaml](config.example.yaml) to `~/.config/ha-notice/config.yaml` and set `base_url` and `service` (without them a send exits 2).
 5. Run `ha-notice validate --probe`, and `ha-notice validate --test-message` once by hand to see a test notification on your phone.
 
+## Live tests
+
+The maintainer's live suite (`pytest -m live -s`, never in CI) sends real notifications and needs a look at the phone; see [docs/live-tests.md](docs/live-tests.md).
+
 ## Safety
 
 - A message that is only a companion-app command word is refused, `link` must be a printable-ASCII `http` or `https` URL (and, with `link_hosts` set, on an allowed host), and the request carries no caller-supplied `data` ([Command messages](docs/interface.md#command-messages), [Rendering](docs/interface.md#rendering)).
