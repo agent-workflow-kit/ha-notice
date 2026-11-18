@@ -21,7 +21,6 @@ from ha_notice.output import (
     emit_error,
     fail,
     flush_streams,
-    safe_key,
     safe_pointer,
 )
 from tests.fake_gateway import FakeGateway
@@ -289,22 +288,6 @@ def test_safe_pointer_keeps_ordinary_names_and_the_root() -> None:
     assert safe_pointer("message\n") == "/?"  # a trailing LF is not a match
 
 
-def test_a_config_key_of_5000_characters_is_question_mark() -> None:
-    assert safe_key("k" * 5000) == "?"
-    error = _valid(build_error("config_invalid", key=safe_key("k" * 5000)))
-    assert error["details"] == {"key": "?"}
-
-
-@pytest.mark.parametrize("name", ["", "a-b", "a b", "a.b", "é", "k" * 65, "a\n", "\ud800", "x\x00"])
-def test_safe_key_refuses_anything_but_a_plain_name(name: str) -> None:
-    assert safe_key(name) == "?"
-
-
-def test_safe_key_keeps_a_plain_name() -> None:
-    assert safe_key("base_url") == "base_url"
-    assert safe_key("k" * 64) == "k" * 64
-
-
 def test_a_file_path_key_is_kept_but_bounded_and_the_envelope_stays_valid() -> None:
     path = "/home/u/.config/ha-notice/config.yaml"
     assert _valid(build_error("config_invalid", key=path))["details"] == {"key": path}
@@ -367,7 +350,7 @@ def test_the_envelope_never_contains_what_the_caller_cannot_pass() -> None:
             continue
         kwargs: dict[str, Any] = {}
         if code == "config_invalid":
-            kwargs["key"] = safe_key(secret + "é")
+            kwargs["key"] = "?"
         if code == "credential_invalid":
             kwargs["env"] = "HA_TOKEN"
         if code in RESPONSE_CODES or code == "wrong_host_response":

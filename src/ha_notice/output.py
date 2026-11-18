@@ -6,8 +6,9 @@ One place maps an outcome to its exit code, its envelope and its human line.
   table, picks the fixed message, derives ``retryable`` and ``unknown_outcome`` from the exit-12
   table and refuses (``ValueError``, a programming error that ``cli.main`` turns into exit 1) any
   detail that would not match ``schemas/cli/error.json``. No message is built from input.
-- ``safe_pointer`` and ``safe_key`` are the hostile-input rules for ``details.pointer`` and
-  ``details.key``: a name that is not plain becomes ``?``.
+- ``safe_pointer`` is the hostile-input rule for ``details.pointer``: a name that is not plain
+  becomes ``?``. There is no such helper for ``details.key``: an unknown config key is never echoed
+  (``config.py`` passes ``?``).
 - ``emit_error`` and ``fail`` print the envelope on stdout (with ``--json``) and then the one
   human line on stderr: stdout is written and flushed before stderr.
 - ``write_text`` is the single sink. It writes UTF-8 bytes with errors replaced, never through the
@@ -117,7 +118,6 @@ OVERRIDE_MESSAGES = frozenset(
         CA_FILE_MESSAGE,
     }
 )
-_KEY_RE = re.compile(r"[A-Za-z0-9_]{1,64}")
 _FIELD_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _POINTER_RE = re.compile(r"(?:|/(?:[A-Za-z0-9_-]{1,64}|\?))")
 
@@ -166,16 +166,6 @@ def _error_envelope(
 class ErrorResult:
     exit_code: int
     envelope: dict[str, Any]
-
-
-def safe_key(name: str) -> str:
-    """``details.key`` for a config key name: the name when it is plain, else ``?``.
-
-    Callers own this call for every config key name read from a file. Fixed literals (``--config``,
-    ``home``) and file paths are passed to ``build_error`` as they are, not through here.
-    ``config.py`` does this for every unknown key name.
-    """
-    return name if _KEY_RE.fullmatch(name) else "?"
 
 
 def safe_pointer(field: str | None) -> str:

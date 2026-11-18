@@ -15,7 +15,8 @@ Rules kept here (docs/interface.md, Config):
 - Any failure to read or parse a file (also ``RecursionError`` and ``MemoryError``) is
   ``ConfigError`` whose key is the file path; the YAML error text, which quotes the file, is
   never kept, not even as ``__cause__``.
-- An unknown key is refused before its value is examined, by ``output.safe_key``.
+- An unknown key is refused before its value is examined, and reported as ``?``, never by name
+  (it may be a secret pasted as a key).
 - The type of each known key is checked first, then its grammar and range (issue #9):
   durations (``(0|[1-9][0-9]*)(\\.[0-9]+)?(ms|s|m)?`` of at most 64 characters, or a finite number
   of seconds, compared exactly in ``Fraction``s, so ``1e3``, ``1:30``, ``.nan`` and a bool are
@@ -42,7 +43,7 @@ from typing import Any
 import yaml
 
 from ha_notice.gateway import Gateway, HomeLookupError, SourceError
-from ha_notice.output import ErrorResult, build_error, safe_key
+from ha_notice.output import ErrorResult, build_error
 from ha_notice.payload import has_lone_surrogate, is_empty_text, sanitize_title
 
 __all__ = [
@@ -103,7 +104,7 @@ PREFIX_MAX = 16
 
 class ConfigError(Exception):
     """The config cannot be used. ``key`` is the ``details.key`` of the ``config_invalid`` error
-    (a plain key name or ``?``, ``home``, ``--config`` or a file path); ``error`` is the
+    (a known key name, ``?``, ``home``, ``--config`` or a file path); ``error`` is the
     ready-made result (exit 2). The message is fixed."""
 
     def __init__(self, key: str) -> None:
@@ -537,7 +538,7 @@ def _check_document(doc: object) -> str | None:
         return ""
     for name in doc:  # unknown keys first, before any value is looked at
         if name not in KNOWN_KEYS:
-            return safe_key(name) if type(name) is str else "?"
+            return "?"  # an unknown name is never echoed: it may be a secret pasted as a key
     for name, value in doc.items():
         if not _type_ok(name, value):
             return name

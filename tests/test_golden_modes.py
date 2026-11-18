@@ -123,6 +123,13 @@ SEND: tuple[Scenario, ...] = (
         "error-config-invalid-key.json",
         config=BASE + '"bad key": 1\n',
     ),
+    Scenario(
+        "config-invalid-unknown-key",
+        2,
+        "cli/error",
+        "error-config-invalid-key.json",
+        config=BASE + "HA_FAKE_TOKEN_abcdef123456: 1\n",
+    ),
     Scenario("usage", 2, "cli/error", "usage-no-command.json", argv=()),
     Scenario(
         "refused-empty-message",

@@ -684,11 +684,11 @@ def test_a_secret_in_a_bad_value_of_a_known_key_is_not_echoed(gw: FakeGateway, h
 # --- unknown keys ----------------------------------------------------------------------------
 
 
-def test_an_unknown_key_is_refused_by_name(gw: FakeGateway, home: Path) -> None:
+def test_an_unknown_key_is_refused_as_question_mark(gw: FakeGateway, home: Path) -> None:
     write_main(home, "servce: x\n")
     err = fails(gw)
-    assert err.key == "servce"
-    assert err.error.envelope["error"]["details"] == {"key": "servce"}
+    assert err.key == "?"
+    assert err.error.envelope["error"]["details"] == {"key": "?"}
 
 
 def test_an_unknown_key_of_5000_characters_is_question_mark(gw: FakeGateway, home: Path) -> None:
@@ -723,24 +723,24 @@ def test_an_unusual_unknown_key_is_never_echoed(gw: FakeGateway, home: Path, key
     assert FAKE_SECRET not in json.dumps(err.error.envelope)
 
 
-def test_a_64_character_plain_unknown_key_is_named(gw: FakeGateway, home: Path) -> None:
+def test_a_64_character_plain_unknown_key_is_not_named(gw: FakeGateway, home: Path) -> None:
     write_main(home, "k" * 64 + ": 1\n")
-    assert fails(gw).key == "k" * 64
+    assert fails(gw).key == "?"
 
 
 def test_an_unknown_key_is_refused_before_its_value_is_examined(
     gw: FakeGateway, home: Path
 ) -> None:
     write_main(home, "zzz: " + "[" * 50 + "]" * 50 + "\n")
-    assert fails(gw).key == "zzz"
+    assert fails(gw).key == "?"
     write_main(home, f"zzz: {FAKE_SECRET}\nmax_chars: oops\n")
-    assert fails(gw).key == "zzz"
+    assert fails(gw).key == "?"
 
 
 def test_an_unknown_key_in_a_drop_in_is_refused(gw: FakeGateway, home: Path) -> None:
     write_main(home, "log: true\n")
     write_dropin(home, "a.yaml", "nope: 1\n")
-    assert fails(gw).key == "nope"
+    assert fails(gw).key == "?"
 
 
 def test_unknown_level_prefix_member_names_level_prefix(gw: FakeGateway, home: Path) -> None:
@@ -806,7 +806,7 @@ def test_load_does_not_read_the_environment_or_the_token(
 def test_config_error_builds_the_standard_envelope(gw: FakeGateway, home: Path) -> None:
     write_main(home, "nope: 1\n")
     err = fails(gw)
-    expected = build_error("config_invalid", key="nope")
+    expected = build_error("config_invalid", key="?")
     assert err.error == expected
     assert err.error.envelope["error"]["code"] == "config_invalid"
 
