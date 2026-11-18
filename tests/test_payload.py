@@ -264,7 +264,6 @@ def test_a_whitespace_only_message_is_empty_message() -> None:
         {"message": "héllo\n😀", "title": "t\ttab", "level": "action"},
         {"message": "x" * 100000},
         {"message": "m", "title": ""},
-        {"message": "m", "link": ""},
     ],
 )
 def test_flags_and_json_give_the_same_notification(fields: dict[str, str]) -> None:
@@ -278,8 +277,6 @@ def test_flags_and_json_give_the_same_notification(fields: dict[str, str]) -> No
     assert from_flags == from_json
     if fields.get("title") == "":
         assert from_flags.title is None  # an empty title is absent (sanitizer)
-    if fields.get("link") == "":
-        assert from_flags.link == ""
 
 
 @pytest.mark.parametrize(
@@ -289,6 +286,8 @@ def test_flags_and_json_give_the_same_notification(fields: dict[str, str]) -> No
         {"title": None, "message": "", "level": None, "link": None},
         {"title": None, "message": "m", "level": "bad", "link": None},
         {"title": None, "message": "m", "level": "", "link": None},
+        {"title": None, "message": "m", "level": None, "link": ""},
+        {"title": None, "message": "m", "level": None, "link": "javascript:x"},
         {"title": "x" * 100001, "message": "m", "level": None, "link": None},
         {"title": None, "message": "m" * 100001, "level": None, "link": None},
     ],
@@ -303,8 +302,9 @@ def test_flags_and_json_are_refused_the_same_way(flags: dict[str, str | None]) -
 
 # --- schema agreement ----------------------------------------------------------------------
 
-# Rules the schema states that the tool judges later: the link rule is #15 (``link_invalid``).
-_LINK_RULES_OF_ISSUE_15 = {
+# The link rule (issue #15): the field layer accepts any string, so the link rule refuses these
+# samples as ``link_invalid`` (with no details).
+_LINK_RULES = {
     "link_trailing_lf",
     "link_space",
     "link_non_ascii",
@@ -324,9 +324,7 @@ def test_every_valid_sample_passes_the_field_checks(name: str) -> None:
         assert (name, err.reason) == ("empty_message_is_the_tools_check", "empty_message")
 
 
-@pytest.mark.parametrize(
-    "name", [n for n in SAMPLES["invalid"] if n not in _LINK_RULES_OF_ISSUE_15]
-)
+@pytest.mark.parametrize("name", [n for n in SAMPLES["invalid"] if n not in _LINK_RULES])
 def test_every_invalid_sample_is_refused_like_the_schema_says(name: str) -> None:
     sample = SAMPLES["invalid"][name]
     assert schema_errors("notification", sample["instance"]) != []
@@ -340,8 +338,8 @@ def test_every_invalid_sample_is_refused_like_the_schema_says(name: str) -> None
         assert (err.reason, err.pointer) == ("invalid_payload", pointer)
 
 
-@pytest.mark.parametrize("name", sorted(_LINK_RULES_OF_ISSUE_15))
-def test_link_rule_samples_are_left_to_issue_15(name: str) -> None:
-    # TODO(#15): these become link_invalid; until then they are strings and pass this layer.
+@pytest.mark.parametrize("name", sorted(_LINK_RULES))
+def test_link_rule_samples_are_refused_as_link_invalid(name: str) -> None:
     instance = SAMPLES["invalid"][name]["instance"]
-    assert validate_notification(instance).link == instance["link"]
+    err = refusal(instance)
+    assert (err.reason, err.pointer) == ("link_invalid", None)

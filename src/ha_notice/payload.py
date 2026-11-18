@@ -17,7 +17,8 @@ The sanitizer (issue #13, docs/interface.md, Sanitizer) runs inside ``validate_n
 ``Notification.title`` and ``Notification.message`` hold the sanitized text. TODO(#17): the title
 and message cut, the prefix and the budget (rendering).
 The command-keyword check (issue #14) runs last inside ``validate_notification``, on the sanitized
-message. TODO(#15): the link rule. TODO(#16): ``link_hosts``.
+message. The link rule (issue #15) is in ``link.py`` and runs before the message checks. TODO(#16):
+``link_hosts``.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ha_notice.link import link_reason
 from ha_notice.output import ErrorResult, build_error, safe_pointer
 
 TEXT_MAX = 100000  # characters of input for title and message
@@ -36,12 +38,13 @@ DEFAULT_LEVEL = "info"
 FIELDS = ("title", "message", "level", "link")  # the order in which known fields are checked
 
 
-_NO_POINTER = frozenset({"empty_message", "command_keyword"})
+_NO_POINTER = frozenset({"empty_message", "command_keyword", "link_scheme"})
 
 
 class PayloadError(Exception):
-    """A refused notification (exit 20). ``reason`` is ``invalid_payload``, ``empty_message`` or
-    ``command_keyword`` (the last two have no details);
+    """A refused notification (exit 20). ``reason`` is ``invalid_payload``, ``empty_message``,
+    ``command_keyword``, ``link_invalid`` or ``link_scheme`` (only ``invalid_payload`` and the
+    ``link_hosts`` form of ``link_invalid`` have details);
     ``field`` is the offending field name (``None`` for the document itself) and is only ever
     turned into a pointer through ``safe_pointer``. Neither is built from an input value except
     the field name, which is never printed raw."""
@@ -53,13 +56,18 @@ class PayloadError(Exception):
 
     @property
     def pointer(self) -> str | None:
-        """``details.pointer``; ``None`` for ``empty_message`` and ``command_keyword``."""
-        return None if self.reason in _NO_POINTER else safe_pointer(self.field)
+        """``details.pointer``; ``None`` for ``empty_message``, ``command_keyword``,
+        ``link_scheme`` and a ``link_invalid`` without a field (a link rule failure; only the
+        ``link_hosts`` refusal, which names the field ``link``, has the pointer ``/link``)."""
+        if self.reason in _NO_POINTER or (self.reason == "link_invalid" and self.field is None):
+            return None
+        return safe_pointer(self.field)
 
     def to_error(self) -> ErrorResult:
-        if self.reason in _NO_POINTER:
+        pointer = self.pointer
+        if pointer is None:
             return build_error("refused", reason=self.reason)
-        return build_error("refused", reason=self.reason, pointer=self.pointer)
+        return build_error("refused", reason=self.reason, pointer=pointer)
 
 
 # --- sanitizer (docs/interface.md, Sanitizer) ---------------------------------------------
@@ -194,11 +202,13 @@ def validate_notification(obj: object) -> Notification:
         level = value
     link = None
     if "link" in obj:
-        # TODO(#15): the link rule (length, characters, scheme, host, port).
-        # TODO(#16): link_hosts.
-        if type(obj["link"]) is not str:
-            raise PayloadError("invalid_payload", "link")
         link = obj["link"]
+        if type(link) is not str:
+            raise PayloadError("invalid_payload", "link")
+        reason = link_reason(link)
+        if reason is not None:
+            raise PayloadError(reason)  # no details (docs/interface.md, details by reason)
+        # TODO(#16): link_hosts; its refusal is PayloadError("link_invalid", "link") (/link).
     if message is None or is_empty_text(message):
         raise PayloadError("empty_message")
     # Order: link failures, then empty_message, then command_keyword (docs/interface.md).

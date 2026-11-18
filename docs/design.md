@@ -84,7 +84,8 @@ Later (additive, after a live phone test): whether `importance`, `channel`, `ttl
 | `cli.py` | Argument parsing, command dispatch, catching unexpected exceptions as exit 1. |
 | `output.py` | The output sink (UTF-8, failures ignored, stdout before stderr), the exit-code table, the error envelope and the human lines. |
 | `config.py` | Config loading from the password-database home, drop-ins, strict YAML parse, Pydantic validation (no environment overrides, no environment-selected path). |
-| `payload.py` | Input reading and hardened JSON parse, notification validation, sanitizer, link rule, command-keyword check. |
+| `payload.py` | Input reading and hardened JSON parse, notification validation, sanitizer, command-keyword check. |
+| `link.py` | The link rule (syntax, scheme, port, IPv6 literal); no URL parser. |
 | `render.py` | Request body: title, message, `data` allowlist, truncation. |
 | `hass.py` | URL building, request building, response mapping, 429 and connect retries, the deadline, the probe call. |
 | `log.py` | Log record writing, bounded lock, rotation and reopen. |
