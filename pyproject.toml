@@ -1,11 +1,11 @@
 [project]
 name = "ha-notice"
-version = "0.0.1"
+version = "0.11.0"
 description = "Send a notification through the Home Assistant REST notify service"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
-dependencies = []
+dependencies = ["pyyaml>=6"]
 
 [project.scripts]
 ha-notice = "ha_notice.cli:main"
@@ -25,7 +25,6 @@ dev = [
     "pymarkdownlnt>=0.9.41",
     "jsonschema>=4.23",
     "referencing>=0.35",
-    "pyyaml>=6",
     "types-pyyaml>=6.0.12",
 ]
 
