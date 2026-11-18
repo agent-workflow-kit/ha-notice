@@ -111,8 +111,9 @@ def facts(**kw: Any) -> RunFacts:
         "actor": "auto:cron",
         "actor_source": "default",
     }
-    if kw.get("exit_code") == 20:
-        # docs/interface.md, Log: a refusal never built a request, so these are null.
+    if kw.get("exit_code") == 20 or kw.get("code") == "unavailable":
+        # docs/interface.md, Log: a refusal and an input timeout (`unavailable`) never built a
+        # request, so these are null.
         base.update(dict.fromkeys(REFUSED_NULL_FIELDS))
     base.update(kw)
     return RunFacts(**base)

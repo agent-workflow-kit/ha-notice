@@ -65,14 +65,14 @@
       "exit": 12,
       "code": "unavailable",
       "reason": null,
-      "level": "info",
-      "bytes": 42,
-      "truncated": false,
+      "level": null,
+      "bytes": null,
+      "truncated": null,
       "duration_ms": 120,
       "http_status": null,
-      "message_sha256": "0123456789abcdef",
+      "message_sha256": null,
       "dedupe_key_sha256": null,
-      "tag_set": false,
+      "tag_set": null,
       "actor": "auto:cron",
       "actor_source": "default"
     },
@@ -1002,6 +1002,156 @@
         "http_status"
       ],
       "keyword": "minimum"
+    },
+    "unavailable_with_level": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "failed",
+        "exit": 12,
+        "code": "unavailable",
+        "reason": null,
+        "level": "info",
+        "bytes": null,
+        "truncated": null,
+        "duration_ms": 120,
+        "http_status": null,
+        "message_sha256": null,
+        "dedupe_key_sha256": null,
+        "tag_set": null,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "level"
+      ],
+      "keyword": "type"
+    },
+    "unavailable_with_bytes": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "failed",
+        "exit": 12,
+        "code": "unavailable",
+        "reason": null,
+        "level": null,
+        "bytes": 42,
+        "truncated": null,
+        "duration_ms": 120,
+        "http_status": null,
+        "message_sha256": null,
+        "dedupe_key_sha256": null,
+        "tag_set": null,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "bytes"
+      ],
+      "keyword": "type"
+    },
+    "unavailable_with_truncated": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "failed",
+        "exit": 12,
+        "code": "unavailable",
+        "reason": null,
+        "level": null,
+        "bytes": null,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": null,
+        "message_sha256": null,
+        "dedupe_key_sha256": null,
+        "tag_set": null,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "truncated"
+      ],
+      "keyword": "type"
+    },
+    "unavailable_with_message_sha256": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "failed",
+        "exit": 12,
+        "code": "unavailable",
+        "reason": null,
+        "level": null,
+        "bytes": null,
+        "truncated": null,
+        "duration_ms": 120,
+        "http_status": null,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": null,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "message_sha256"
+      ],
+      "keyword": "type"
+    },
+    "unavailable_with_dedupe_key_sha256": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "failed",
+        "exit": 12,
+        "code": "unavailable",
+        "reason": null,
+        "level": null,
+        "bytes": null,
+        "truncated": null,
+        "duration_ms": 120,
+        "http_status": null,
+        "message_sha256": null,
+        "dedupe_key_sha256": "0123456789abcdef",
+        "tag_set": null,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "dedupe_key_sha256"
+      ],
+      "keyword": "type"
+    },
+    "unavailable_with_tag_set": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "failed",
+        "exit": 12,
+        "code": "unavailable",
+        "reason": null,
+        "level": null,
+        "bytes": null,
+        "truncated": null,
+        "duration_ms": 120,
+        "http_status": null,
+        "message_sha256": null,
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "tag_set"
+      ],
+      "keyword": "type"
     }
   }
 }

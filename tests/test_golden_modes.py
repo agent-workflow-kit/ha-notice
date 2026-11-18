@@ -430,7 +430,10 @@ def test_the_mode_prints_its_golden_and_a_schema_valid_document(
         assert all(json.loads(line)["version"] == __version__ for line in raw.splitlines())
         text = raw.replace(f'"version":"{__version__}"', '"version":"0.1.0"')
         golden.check("log", sc.log, text, schema="log")
-    elif not sc.logs_unchecked:
+    elif sc.logs_unchecked:
+        # The record's content is not pinned here, but a scenario that stopped logging must fail.
+        assert log.exists() and log.stat().st_size > 0, "this scenario must write a log record"
+    else:
         assert not log.exists(), "this scenario has no log golden but wrote a log record"
 
 
