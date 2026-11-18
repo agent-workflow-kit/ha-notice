@@ -41,7 +41,7 @@ Flag text is untrusted and goes through the same [sanitizer](#sanitizer) as stdi
 
 Applied to title and message before rendering, in this order. Every pattern in this document is matched against the whole string (`re.fullmatch`); a trailing newline never passes.
 
-1. Input is read as bytes and decoded as strict UTF-8, never through the locale. Invalid UTF-8 or a lone surrogate: exit 20 refused, reason `invalid_payload`.
+1. Input is read as bytes and decoded as strict UTF-8, never through the locale. Invalid UTF-8 or a lone surrogate (also one made by a JSON `\ud800` escape or found in a flag value, which Python holds as a surrogate code point): exit 20 refused, reason `invalid_payload`, `details.pointer` `/title` or `/message` for a field and `""` for a parse failure. A lone surrogate is refused, never removed: no text that reaches step 3 holds one.
 2. CRLF, CR, U+0085, U+2028 and U+2029 become LF. The tab becomes a space.
 3. The characters in the table below are removed; nothing else is. The table and this rule are one list.
 4. Trailing whitespace of every line is removed (`str.rstrip`), then runs of more than two LF become two, then leading and trailing whitespace is removed (`str.strip`, Unicode whitespace).
@@ -50,7 +50,7 @@ Applied to title and message before rendering, in this order. Every pattern in t
 | Class | Characters | Action |
 |---|---|---|
 | Cc | every control character other than LF | Removed (the tab became a space in step 2). |
-| Cs, Co | surrogates, private use | Removed. |
+| Cs, Co | surrogates, private use | Private use is removed. A lone surrogate never reaches this step (step 1 refuses it); a valid pair is one astral character and not a Cs. |
 | Cn | unassigned code points and noncharacters, including U+FDD0 to U+FDEF and U+FFFE and U+FFFF of every plane | Removed. Membership follows the running Python's Unicode tables; the golden test pins a fixed list of code points. |
 | Zl, Zp | U+2028, U+2029 | Became LF in step 2. |
 | Listed Cf and default-ignorable | U+00AD, U+061C, U+180E, U+200B, U+200E, U+200F, U+202A to U+202E, U+2060 to U+206F, U+FEFF, U+FFF9 to U+FFFB, U+E0000 to U+E007F, U+E0100 to U+E01EF; the fillers U+115F, U+1160, U+3164 and U+FFA0; U+2800; the Mongolian selectors U+180B to U+180D and U+180F | Removed. |
