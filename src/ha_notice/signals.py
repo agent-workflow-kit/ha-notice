@@ -13,8 +13,8 @@ the main thread when it looks at the flag:
   blocked read ends within one slice.
 - During the send the flag is the ``stop`` callable of ``deadline.run_with_deadline``: the main
   thread polls it every 100 ms and decides like the deadline, by the gate state. That result
-  is #27's and follows docs/interface.md (Deadline), log step included. TODO(#27): the send flow
-  wires ``SignalState.stopped`` there.
+  follows docs/interface.md (Deadline), log step included; ``send.deliver`` passes
+  ``SignalState.stopped`` there.
 
 Handlers are installed and restored through the gateway (``install``) and are restored on every
 path; ``cli`` keeps them (flag-only) until after the final stream flush, so a late signal cannot

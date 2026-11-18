@@ -253,7 +253,7 @@ class ValidateArgs:
 class Progress:
     """How far a handler got. The send flow sets ``writing`` when the gate reaches ``writing``;
     after that, an internal failure is reported with ``unknown_outcome`` true (interface.md,
-    Exit codes). TODO(#27): the send flow sets it."""
+    Exit codes). ``send.deliver`` sets it from the verdict's gate state."""
 
     def __init__(self) -> None:
         self.writing = False
@@ -455,8 +455,9 @@ def _run(args: list[str], environment: Mapping[str, str], gw: Gateway) -> int:
                 raise ValueError("a handler returned something that is not an exit code")
         except (Exception, SystemExit):  # noqa: BLE001 - the class and text are never printed
             # SignalReceived and KeyboardInterrupt are not caught here: main maps them to 128+N.
-            inv.signals.check()  # a signal wins over whatever it interrupted
             done = emitted_exit()
+            if done is None:  # a result already reported wins over a later signal
+                inv.signals.check()  # otherwise a signal wins over whatever it interrupted
             if done is not None:  # one envelope per run: the handler already printed its own
                 code = done
             else:

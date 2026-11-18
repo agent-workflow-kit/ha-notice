@@ -25,8 +25,10 @@ docs/interface.md (Home Assistant edge, Deadline) is normative. In short:
   text and class are dropped.
 
 The ``stop`` callable is the seam for the signal handler (``signals.SignalState.stopped``): a stop
-is decided like the deadline. TODO(#27): the send flow prints, logs and calls ``finish``;
-``finish`` does not flush stdout or stderr, so the flow prints and flushes before it.
+is decided like the deadline. The send flow (``send.deliver``) prints, logs and calls ``finish``;
+``finish`` does not flush stdout or stderr, so the flow prints and flushes before it. A failure of
+``worker.start()`` ("can't start new thread") raises ``RuntimeError`` here; the send flow maps it
+to exit 1 ``internal error``.
 """
 
 from __future__ import annotations
@@ -231,8 +233,7 @@ def run_with_deadline(
             the_gate.publish_crash()
 
     worker = threading.Thread(target=work, name=WORKER_NAME, daemon=True)
-    # todo(#27): start() can raise RuntimeError (cannot start new thread): map it to exit 1
-    # internal in the send flow.
+    # start() can raise RuntimeError (cannot start new thread); send.deliver maps it to exit 1.
     worker.start()
     while not the_gate.wait(0):
         left = deadline - gateway.monotonic()

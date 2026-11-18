@@ -15,12 +15,11 @@ or actor grammar, a range) is never written: ``build_record`` raises ``ValueErro
 warns once. A short or failed write is cut back (best effort) to the size before it, so no
 partial line is left for the next record to be glued to.
 
-TODO(#27): call ``write_log_record`` from ``send.deliver`` after the result is printed (and skip
-it when config ``log`` is false); the signal exits (128+N) are never logged (#26). The criteria
-that need ``send.py`` are deferred to #27 with it: the result is printed and flushed before the
-log step; the log step stays within timeout + 3 s with the lock held by another process;
-``log: false`` and dry runs touch nothing; and the send-level checks (a FIFO or symlinked log
-entry costs one warning, never a hang or a changed exit code).
+``send.py`` calls it after the result is printed and flushed, never for a dry run, with config
+``log`` false or for a signal exit (128+N). The send-level checks (the result before the log step,
+the run within timeout + 3 s with the lock held, nothing written for ``log: false`` and dry runs,
+a FIFO or symlinked log entry costs one warning and never changes the exit code) are in
+tests/test_send.py.
 """
 
 from __future__ import annotations
