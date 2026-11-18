@@ -278,15 +278,19 @@ def test_a_duration_string_is_capped_at_64_characters(gw: FakeGateway, home: Pat
     assert fails(gw).key == "timeout"
 
 
-def test_the_duration_cap_does_not_depend_on_the_int_conversion_limit(
-    gw: FakeGateway, home: Path, monkeypatch: pytest.MonkeyPatch
+def test_the_duration_cap_holds_under_the_lowest_int_conversion_limit(
+    gw: FakeGateway, home: Path
 ) -> None:
     import sys
 
-    monkeypatch.setattr(sys, "get_int_max_str_digits", lambda: 4300, raising=False)
-    at_cap = "1." + "0" * 62
-    assert loads(gw, home, f"timeout: '{at_cap}'\n").timeout == 1.0
-    assert not config.duration_ok("timeout", "1" + "0" * 65)
+    previous = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(640)  # the lowest value Python allows
+    try:
+        at_cap = "1." + "0" * 62
+        assert loads(gw, home, f"timeout: '{at_cap}'\n").timeout == 1.0
+        assert not config.duration_ok("timeout", "1" + "0" * 64)
+    finally:
+        sys.set_int_max_str_digits(previous)
 
 
 def test_the_duration_grammar_matches_the_schema() -> None:
