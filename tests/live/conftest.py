@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.live.support import LiveConfig, new_run_id, scratch_dir
+from tests.live.support import LiveConfig, any_live_variable, new_run_id, scratch_dir
 
 LIVE_DIR = Path(__file__).resolve().parent
 
@@ -33,10 +33,13 @@ def run_id() -> str:
 
 @pytest.fixture
 def live(request: pytest.FixtureRequest) -> LiveConfig:
-    """The maintainer's configuration, or a skip that says what to set."""
+    """The maintainer's configuration; a skip when no LIVE_HA_* variable is set at all, a failure
+    that names the problem (never a value) when the configuration is partly set or invalid."""
     cfg, reason = LiveConfig.from_env(os.environ)
     if cfg is None:
-        pytest.skip(f"live suite {reason} (see docs/live-tests.md)")
+        if not any_live_variable(os.environ):
+            pytest.skip(f"live suite {reason} (see docs/live-tests.md)")
+        pytest.fail(f"live suite configuration is invalid: {reason}", pytrace=False)
     if request.config.getoption("capture") != "no":
         pytest.skip("run with -s: the instructions for the person are printed")
     return cfg

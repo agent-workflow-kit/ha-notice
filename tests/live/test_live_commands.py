@@ -2,8 +2,9 @@
 
 The tool refuses these (exit 20 ``command_keyword``) before it sends. This test bypasses the
 tool through ``send_command_word`` to see whether a phone acts on each family. It is skipped
-unless ``LIVE_HA_ALLOW_COMMANDS=1`` is set, even under ``-m live``. A phone may clear its
-notifications, speak, wake its screen or report its location.
+unless ``LIVE_HA_ALLOW_COMMANDS=1`` is set AND it is selected explicitly with
+``-m live_commands`` (the plain ``-m live`` run never sends a word, even with the opt-in set).
+A phone may clear its notifications, speak, wake its screen or report its location.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from tests.live.checklist import settles
 from tests.live.support import (
     LiveConfig,
     banner,
+    countdown,
     marker,
     out,
     pause,
@@ -24,7 +26,9 @@ from tests.live.support import (
 )
 
 # One word per family, in the order of docs/interface.md (Command messages). Each family is
-# sent as the whole message; the title names the word so the person can tell them apart.
+# sent as the whole message; the title names the word so the person can tell them apart. This is
+# a SAMPLE, not an exhaustive list of what the companion apps accept; effects vary by app version
+# and platform and are unverified here. The maintainer reviews the list.
 FAMILY_WORDS = (
     "tts",
     "clear_notification",
@@ -38,20 +42,33 @@ FAMILY_WORDS = (
 )
 
 
+_EFFECTS = {
+    "tts": "  (may speak the text aloud)",
+    "request_location_update": "  (the phone may report its location to Home Assistant)",
+    "command_screen_on": "  (may wake the screen)",
+    "clear_notification": "  (may clear notifications)",
+}
+
+
 @pytest.mark.live_commands
 @settles("V10")
-def test_command_word_families(live: LiveConfig, run_id: str) -> None:
+def test_command_word_families(
+    live: LiveConfig, run_id: str, request: pytest.FixtureRequest
+) -> None:
     """Each family word as the whole message, then a prefixed control that must show as text."""
     banner("command word families (DANGEROUS)", ("V10",), run_id)
+    if request.config.getoption("markexpr") != "live_commands":
+        pytest.skip("opt-in only: select it explicitly with -m live_commands -s")
     if not live.allow_commands:
         pytest.skip("opt-in only: set LIVE_HA_ALLOW_COMMANDS=1 to send command words")
     out("!" * 78)
-    out("!! SENDING COMPANION-APP COMMAND WORDS TO YOUR PHONE. IT MAY ACT ON THEM:")
-    out("!! clear notifications, speak, wake the screen, report its location.")
-    out("!! Keep the phone in view. Words, one per notification, in this order:")
+    out("!! SENDING COMPANION-APP COMMAND WORDS TO YOUR PHONE. IT MAY ACT ON THEM.")
+    out("!! The words below are a sample; their effects vary by app version and platform and")
+    out("!! are unverified here. Keep the phone in view. Words, one per notification, in order:")
     for number, word in enumerate(FAMILY_WORDS, 1):
-        out(f"!!   {number}. {word}")
+        out(f"!!   {number}. {word}{_EFFECTS.get(word, '')}")
     out("!" * 78)
+    countdown(live)
     see(
         "Per notification, titled 'V10 <n>/<N> <word>': does the phone ACT (a spoken or silent "
         "command, a cleared list, the screen waking, a location update) or does it SHOW the "

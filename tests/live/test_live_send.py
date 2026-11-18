@@ -32,7 +32,10 @@ def assert_sent(run: ToolRun) -> dict[str, object]:
 
 @settles("spike-success")
 def test_plain_send(live: LiveConfig, run_id: str, workdir: Path) -> None:
-    """A plain notification through the tool, then the same body raw to record the 200 reply."""
+    """A plain notification through the tool, then the same body raw to record the 200 reply.
+
+    The raw reply is record-only apart from the 200 status.
+    """
     banner("plain send", ("spike-success",), run_id)
     config = write_config(workdir, live)
     title = marker(run_id, "plain")
@@ -91,35 +94,54 @@ def test_tag_replacement(live: LiveConfig, run_id: str, workdir: Path) -> None:
 
 @settles("V9")
 def test_link_tap(live: LiveConfig, run_id: str, workdir: Path) -> None:
-    """A link: the tool sends both ``url`` (iOS) and ``clickAction`` (Android)."""
+    """A link: the tool sends both ``url`` (iOS) and ``clickAction`` (Android); two raw sends
+    carry each key alone, so a tap can say which of the two a platform needs."""
     banner("link tap", ("V9",), run_id)
     config = write_config(workdir, live)
     link = f"https://example.org/ha-notice-live-{run_id}"
-    title = marker(run_id, "link")
+    title = marker(run_id, "link both (tool)")
     assert_sent(send(config, live, {"title": title, "message": "tap me", "link": link}))
+    pause(live)
+    url_title = marker(run_id, "link url only (raw)")
+    only_url = raw_post_notify(
+        live, {"title": url_title, "message": "tap me", "data": {"url": link}}
+    )
+    out(f"raw, data.url only: {only_url.describe(live.token)}")
+    assert only_url.status == 200
+    pause(live)
+    click_title = marker(run_id, "link clickAction only (raw)")
+    only_click = raw_post_notify(
+        live, {"title": click_title, "message": "tap me", "data": {"clickAction": link}}
+    )
+    out(f"raw, data.clickAction only: {only_click.describe(live.token)}")
+    assert only_click.status == 200
     see(
-        f"One notification titled '{title}', text 'tap me'.",
-        f"Tap it on each platform you have: the browser opens {link} (a page that does not "
+        f"Three notifications, text 'tap me': '{title}', '{url_title}' and '{click_title}'.",
+        f"Tap each on each platform you have: the browser opens {link} (a page that does not "
         "exist is fine).",
-        "Android: note whether the tap opens the link. iOS: note the same.",
+        "Android: note which of the three open the link. iOS: note the same.",
     )
     record(
-        "per platform: tap opened the link yes or no (decides whether both url and "
-        "clickAction are needed)"
+        "per variant (both, url only, clickAction only) per platform: tap opened the link yes "
+        "or no (decides whether both url and clickAction are needed)"
     )
 
 
 @settles("V8")
 def test_long_message_through_the_tool(live: LiveConfig, run_id: str, workdir: Path) -> None:
-    """A 100000-character input is cut to ``max_chars`` (1000 and 2000 here) by the tool."""
+    """A 100000-character input is cut to ``max_chars`` (1000 and 2000 here) by the tool.
+
+    The run marker is in the title; the message is the position text alone, so the numbers on the
+    phone are character positions.
+    """
     banner("long message through the tool", ("V8",), run_id)
-    text = marker(run_id, "tool-long") + " " + position_text(100000)
+    text = position_text(100000)  # the message is the numbers alone: printed number = position
     for limit in (1000, 2000):
         config = write_config(workdir, live, max_chars=limit, name=f"config-{limit}.yaml")
         run = send(
             config,
             live,
-            {"title": marker(run_id, f"tool max_chars {limit}"), "message": text[:100000]},
+            {"title": marker(run_id, f"tool max_chars {limit}"), "message": text},
         )
         envelope = assert_sent(run)
         assert envelope["truncated"] is True
@@ -134,7 +156,10 @@ def test_long_message_through_the_tool(live: LiveConfig, run_id: str, workdir: P
 
 @settles("V8")
 def test_long_message_raw_api(live: LiveConfig, run_id: str) -> None:
-    """The API accepts 1000, 10000 and 100000 characters; what does the phone show?"""
+    """The API accepts 1000, 10000 and 100000 characters; what does the phone show?
+
+    Record-only for the phone: the only assertion is the 200 reply.
+    """
     banner("long message, raw API (no tool cap)", ("V8",), run_id)
     for size in (1000, 10000, 100000):
         title = marker(run_id, f"raw {size}")

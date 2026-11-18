@@ -3,9 +3,11 @@
 Everything here is test-harness code. The LIVE_HA_* variables are read only here (never by
 ``src/``), the token is only ever held in ``LiveConfig.token`` and in the child environment
 under the variable named by ``LIVE_HA_TOKEN_ENV`` (never in argv, a file or any output), and the
-two raw helpers that bypass the tool's own checks are guarded: ``raw_post_notify`` refuses
-companion-app command words, and ``send_command_word`` needs the explicit opt-in
-``LIVE_HA_ALLOW_COMMANDS=1``.
+raw senders that bypass the tool's own checks are guarded: ``raw_post_notify`` (the intended
+sender) refuses companion-app command words, unknown body keys and unknown ``data`` keys,
+``_raw_request`` refuses any POST to a notify service, and ``send_command_word`` needs the
+explicit opt-in ``LIVE_HA_ALLOW_COMMANDS=1``. Errors from the raw client and from the tool run
+are re-raised without the original frames, so ``pytest -l`` never shows the token.
 """
 
 from __future__ import annotations
@@ -25,7 +27,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from ha_notice.payload import check_command_keyword
+import pytest
+
+from ha_notice.config import DURATION_RE, duration_ok
+from ha_notice.payload import check_command_keyword, sanitize_message, sanitize_title
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 TOKEN_ENV_RE = re.compile(r"HA_[A-Z0-9_]{1,60}")
@@ -33,10 +38,26 @@ DEFAULT_BLACKHOLE_URL = "https://192.0.2.1:8123"  # RFC 5737 TEST-NET-1: documen
 RAW_TIMEOUT_S = 20
 RAW_BODY_CAP = 1 << 20
 REQUIRED = ("LIVE_HA_BASE_URL", "LIVE_HA_SERVICE", "LIVE_HA_TOKEN_ENV")
+NOTIFY_PREFIX = "/api/services/notify/"
+BODY_KEYS = frozenset({"title", "message", "data"})
+DATA_KEYS = frozenset({"tag", "url", "clickAction"})
+_UNIT_SECONDS = {None: 1.0, "s": 1.0, "ms": 0.001, "m": 60.0}
 
 
 class CommandWordRefused(Exception):
-    """``raw_post_notify`` was asked to send a companion-app command word."""
+    """``raw_post_notify`` was asked to send a command word or a body key it does not allow."""
+
+
+class NotifyPostRefused(CommandWordRefused):
+    """``_raw_request`` was asked to POST to a notify service (use ``raw_post_notify``)."""
+
+
+class RawRequestError(Exception):
+    """A raw request failed; the message is the exception type only (no host, token or path)."""
+
+
+class ToolTimeout(Exception):
+    """The tool process did not end within the harness limit."""
 
 
 class CommandsNotAllowed(Exception):
@@ -55,7 +76,9 @@ class LiveConfig:
     other_service: str | None = None
     blackhole_url: str = DEFAULT_BLACKHOLE_URL
     timeout: str = "10s"
+    timeout_seconds: float = 10.0
     pause: float = 5.0
+    countdown: float = 10.0
     allow_commands: bool = False
 
     def __repr__(self) -> str:  # never show the token, the host or the service
@@ -73,29 +96,71 @@ class LiveConfig:
         token = env.get(token_env, "").strip()
         if not token or not all("!" <= c <= "~" for c in token):
             return None, f"the variable named by LIVE_HA_TOKEN_ENV ({token_env}) holds no token"
-        try:
-            pause = float(env.get("LIVE_HA_PAUSE", "5"))
-        except ValueError:
-            return None, "LIVE_HA_PAUSE must be a number of seconds"
-        if not 0 <= pause <= 60:
-            return None, "LIVE_HA_PAUSE must be between 0 and 60 seconds"
+        pause, reason = _seconds_var(env, "LIVE_HA_PAUSE", "5")
+        if pause is None:
+            return None, reason
+        countdown, reason = _seconds_var(env, "LIVE_HA_COUNTDOWN", "10")
+        if countdown is None:
+            return None, reason
+        timeout = env.get("LIVE_HA_TIMEOUT") or "10s"
+        timeout_seconds = parse_timeout(timeout)
+        if timeout_seconds is None:
+            return None, "LIVE_HA_TIMEOUT must be a duration of 1s to 120s such as 10s or 1.5s"
+        base_url = env["LIVE_HA_BASE_URL"]
+        prefix_base_url = env.get("LIVE_HA_PREFIX_BASE_URL") or None
+        blackhole_url = env.get("LIVE_HA_BLACKHOLE_URL") or DEFAULT_BLACKHOLE_URL
+        taken = {base_url.rstrip("/")}
+        if prefix_base_url:
+            taken.add(prefix_base_url.rstrip("/"))
+        if blackhole_url.rstrip("/") in taken:
+            return None, (
+                "LIVE_HA_BLACKHOLE_URL must differ from LIVE_HA_BASE_URL and "
+                "LIVE_HA_PREFIX_BASE_URL (it must be an address that does not answer)"
+            )
         return (
             cls(
-                base_url=env["LIVE_HA_BASE_URL"],
+                base_url=base_url,
                 service=env["LIVE_HA_SERVICE"],
                 token_env=token_env,
                 token=token,
                 ca_file=env.get("LIVE_HA_CA_FILE") or None,
                 allow_insecure_http=env.get("LIVE_HA_ALLOW_INSECURE_HTTP") == "1",
-                prefix_base_url=env.get("LIVE_HA_PREFIX_BASE_URL") or None,
+                prefix_base_url=prefix_base_url,
                 other_service=env.get("LIVE_HA_OTHER_SERVICE") or None,
-                blackhole_url=env.get("LIVE_HA_BLACKHOLE_URL") or DEFAULT_BLACKHOLE_URL,
-                timeout=env.get("LIVE_HA_TIMEOUT") or "10s",
+                blackhole_url=blackhole_url,
+                timeout=timeout,
+                timeout_seconds=timeout_seconds,
                 pause=pause,
+                countdown=countdown,
                 allow_commands=env.get("LIVE_HA_ALLOW_COMMANDS") == "1",
             ),
             "",
         )
+
+
+def any_live_variable(env: Mapping[str, str]) -> bool:
+    """True when at least one ``LIVE_HA_*`` variable is set (even to an empty value)."""
+    return any(name.startswith("LIVE_HA_") for name in env)
+
+
+def parse_timeout(value: str) -> float | None:
+    """Seconds of a ``timeout`` in the interface duration grammar (the tool's 1s to 120s range)."""
+    if len(value) > 64 or not duration_ok("timeout", value):
+        return None
+    match = DURATION_RE.fullmatch(value)
+    if match is None:
+        return None
+    return float(match.group(1)) * _UNIT_SECONDS[match.group(2)]
+
+
+def _seconds_var(env: Mapping[str, str], name: str, default: str) -> tuple[float | None, str]:
+    try:
+        value = float(env.get(name, default))
+    except ValueError:
+        return None, f"{name} must be a number of seconds"
+    if not 0 <= value <= 60:
+        return None, f"{name} must be between 0 and 60 seconds"
+    return value, ""
 
 
 # --- printing --------------------------------------------------------------------------------
@@ -134,6 +199,16 @@ def record(*lines: str) -> None:
 
 def pause(cfg: LiveConfig) -> None:
     time.sleep(cfg.pause)
+
+
+def countdown(cfg: LiveConfig) -> None:
+    """Give the person time to read the banner and press Ctrl-C before anything is sent."""
+    remaining = int(cfg.countdown)
+    out(f"Ctrl-C aborts. The first word is sent in {cfg.countdown:g} s.")
+    for left in range(remaining, 0, -1):
+        out(f"  {left}...")
+        time.sleep(1)
+    time.sleep(cfg.countdown - remaining)
 
 
 # --- the tool --------------------------------------------------------------------------------
@@ -193,6 +268,14 @@ class ToolRun:
         err = env.get("error")
         return err if isinstance(err, dict) else {}
 
+    def failed_check(self) -> tuple[str, str] | None:
+        """``(name, message)`` of the failed check of a ``validate`` run (fixed text), or None."""
+        checks = (self.envelope or {}).get("checks")
+        for check in checks if isinstance(checks, list) else []:
+            if isinstance(check, dict) and check.get("ok") is False:
+                return str(check.get("name")), str(check.get("message"))
+        return None
+
     def describe(self) -> str:
         """A fixed-field summary: never the text of the output, never a header or the token."""
         env = self.envelope or {}
@@ -204,7 +287,46 @@ class ToolRun:
             )
         fields = ("outcome", "http_status", "truncated", "bytes", "tag_set", "ok", "probe")
         shown = ", ".join(f"{k} {env[k]!r}" for k in fields if k in env)
+        failed = self.failed_check()
+        if failed:
+            shown += f", failed check {failed[0]!r}: {failed[1]!r}"
         return f"exit {self.code}, {shown or 'no JSON object on stdout'}"
+
+
+def _spawn_inner(
+    config: Path, argv: list[str], cfg: LiveConfig, stdin: str, token: str | None, limit_s: float
+) -> subprocess.CompletedProcess[bytes]:
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "LC_ALL": "C",
+        cfg.token_env: cfg.token if token is None else token,
+    }
+    return subprocess.run(
+        [sys.executable, "-m", "ha_notice", *argv, "--json", "--config", str(config)],
+        input=stdin.encode("utf-8"),
+        env=env,
+        cwd=ROOT,
+        capture_output=True,
+        timeout=limit_s,
+        check=False,
+    )
+
+
+def _spawn(
+    config: Path, argv: list[str], cfg: LiveConfig, stdin: str, token: str | None, limit_s: float
+) -> subprocess.CompletedProcess[bytes]:
+    """Run the child; a timeout is re-raised with no frame that holds the child environment."""
+    try:
+        return _spawn_inner(config, argv, cfg, stdin, token, limit_s)
+    except subprocess.TimeoutExpired:
+        pass
+    raise ToolTimeout(f"the tool did not end within {limit_s:g} s")
+
+
+def _fail_if_token_printed(cfg: LiveConfig, token: str | None, run: ToolRun) -> None:
+    sent = cfg.token if token is None else token
+    if sent in run.stdout or sent in run.stderr:
+        pytest.fail("the tool printed the token", pytrace=False)
 
 
 def run_tool(
@@ -220,31 +342,18 @@ def run_tool(
 
     The environment is built from scratch: PATH, a fixed locale and the one token variable (the
     real token unless ``token`` overrides it; the unreachable-host test passes a dummy so the
-    real token never goes to any other address). The text travels on stdin, never argv.
+    real token never goes to any other address). The text travels on stdin, never argv. No local
+    of this function holds the token, so ``pytest -l`` cannot show it.
     """
-    env = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "LC_ALL": "C",
-        cfg.token_env: cfg.token if token is None else token,
-    }
-    sent = env[cfg.token_env]
     start = time.monotonic()
-    done = subprocess.run(
-        [sys.executable, "-m", "ha_notice", *argv, "--json", "--config", str(config)],
-        input=stdin.encode("utf-8"),
-        env=env,
-        cwd=ROOT,
-        capture_output=True,
-        timeout=limit_s,
-        check=False,
-    )
+    done = _spawn(config, argv, cfg, stdin, token, limit_s)
     run = ToolRun(
         done.returncode,
         done.stdout.decode("utf-8", "replace"),
         done.stderr.decode("utf-8", "replace"),
         time.monotonic() - start,
     )
-    assert sent not in run.stdout and sent not in run.stderr, "the tool printed the token"
+    _fail_if_token_printed(cfg, token, run)
     return run
 
 
@@ -282,15 +391,14 @@ class RawReply:
         return f"HTTP {self.status}, content-type {self.content_type!r}, body {text!r}"
 
 
-def raw_request(
+def _exchange(
     cfg: LiveConfig,
     method: str,
     path: str,
-    *,
-    body: object | None = None,
-    base_url: str | None = None,
-    token: str | None = None,
-    use_ca_file: bool = True,
+    body: object | None,
+    base_url: str | None,
+    token: str | None,
+    use_ca_file: bool,
 ) -> RawReply:
     """One request with the harness's own ``http.client`` (no redirects, no proxy)."""
     parts = urlsplit(cfg.base_url if base_url is None else base_url)
@@ -317,16 +425,91 @@ def raw_request(
         conn.close()
 
 
-def _post_notify_unchecked(cfg: LiveConfig, body: Mapping[str, object]) -> RawReply:
-    return raw_request(cfg, "POST", f"/api/services/notify/{cfg.service}", body=body)
+def _http(
+    cfg: LiveConfig,
+    method: str,
+    path: str,
+    body: object | None,
+    base_url: str | None,
+    token: str | None,
+    use_ca_file: bool,
+) -> RawReply:
+    """``_exchange`` with any error re-raised as a ``RawRequestError`` that names only its type.
+
+    The raise is outside the ``except`` and ``_exchange`` (which builds the headers) is not in
+    the new traceback, so ``pytest -l`` shows no header, host or service. ``token`` here is only
+    ever the dummy token or None (the real token stays inside ``cfg``, whose repr is hidden).
+    """
+    failure = ""
+    try:
+        return _exchange(cfg, method, path, body, base_url, token, use_ca_file)
+    except Exception as exc:
+        failure = type(exc).__name__
+    raise RawRequestError(failure) from None
 
 
-def raw_post_notify(cfg: LiveConfig, body: Mapping[str, object]) -> RawReply:
-    """POST a notify body without the tool (for sizes the tool caps). Refuses command words."""
-    message = body.get("message")
-    if not isinstance(message, str) or check_command_keyword(message):
+def _raw_request(
+    cfg: LiveConfig,
+    method: str,
+    path: str,
+    *,
+    body: object | None = None,
+    base_url: str | None = None,
+    token: str | None = None,
+    use_ca_file: bool = True,
+) -> RawReply:
+    """Unguarded-by-word but never a notify POST: those go through ``raw_post_notify``."""
+    if method.upper() != "GET" and "/services/notify" in path.lower():
+        raise NotifyPostRefused("POST to a notify service goes through raw_post_notify")
+    return _http(cfg, method, path, body, base_url, token, use_ca_file)
+
+
+def raw_get(
+    cfg: LiveConfig,
+    path: str,
+    *,
+    base_url: str | None = None,
+    token: str | None = None,
+    use_ca_file: bool = True,
+) -> RawReply:
+    return _raw_request(cfg, "GET", path, base_url=base_url, token=token, use_ca_file=use_ca_file)
+
+
+def _post_notify_unchecked(
+    cfg: LiveConfig, body: Mapping[str, object], token: str | None = None
+) -> RawReply:
+    return _http(cfg, "POST", f"{NOTIFY_PREFIX}{cfg.service}", body, None, token, True)
+
+
+def _is_command(text: object) -> bool:
+    """True for a non-string and for a command word, raw or after the tool's sanitizing."""
+    if not isinstance(text, str):
+        return True
+    return any(
+        check_command_keyword(candidate)
+        for candidate in (text, sanitize_message(text), sanitize_title(text))
+    )
+
+
+def raw_post_notify(
+    cfg: LiveConfig, body: Mapping[str, object], *, token: str | None = None
+) -> RawReply:
+    """POST a notify body without the tool (for sizes the tool caps, link variants).
+
+    Refuses command words (raw or sanitized, in the title too), any top-level key other than
+    ``title``, ``message`` and ``data``, and any ``data`` key other than ``tag``, ``url`` and
+    ``clickAction``. This is the intended raw sender.
+    """
+    if not set(body) <= BODY_KEYS or "message" not in body:
+        raise CommandWordRefused("raw_post_notify allows only title, message and data")
+    if _is_command(body["message"]) or ("title" in body and _is_command(body["title"])):
         raise CommandWordRefused("raw_post_notify does not send a command word or a non-string")
-    return _post_notify_unchecked(cfg, body)
+    data = body.get("data", {})
+    if not isinstance(data, Mapping) or not set(data) <= DATA_KEYS:
+        raise CommandWordRefused("raw_post_notify allows only tag, url and clickAction in data")
+    if not all(isinstance(v, str) for v in data.values()):
+        raise CommandWordRefused("raw_post_notify allows only string values in data")
+    return _post_notify_unchecked(cfg, body, token)
 
 
 def send_command_word(cfg: LiveConfig, word: str, title: str) -> RawReply:
@@ -338,6 +521,22 @@ def send_command_word(cfg: LiveConfig, word: str, title: str) -> RawReply:
     if not cfg.allow_commands:
         raise CommandsNotAllowed("set LIVE_HA_ALLOW_COMMANDS=1 to send command words")
     return _post_notify_unchecked(cfg, {"title": title, "message": word})
+
+
+def trust_location_state(path: str, *, directory: bool) -> str:
+    """Whether a CA location is unset, missing, present but unusable, or present and loads."""
+    if not path:
+        return "unset"
+    if not os.path.exists(path):
+        return "missing"
+    try:
+        if directory:
+            ssl.create_default_context(capath=path)
+        else:
+            ssl.create_default_context(cafile=path)
+    except (ssl.SSLError, OSError):
+        return "exists, does not load"
+    return "exists, loads"
 
 
 def position_text(length: int) -> str:

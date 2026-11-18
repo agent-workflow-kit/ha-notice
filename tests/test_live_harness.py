@@ -13,8 +13,11 @@ import ast
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -22,7 +25,12 @@ import pytest
 from tests.fake_ha import FakeHA, Reply
 from tests.live import support
 from tests.live.checklist import ITEMS, settles
-from tests.live.support import CommandsNotAllowed, CommandWordRefused, LiveConfig
+from tests.live.support import (
+    CommandsNotAllowed,
+    CommandWordRefused,
+    LiveConfig,
+    NotifyPostRefused,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 LIVE_DIR = ROOT / "tests" / "live"
@@ -193,12 +201,64 @@ def test_config_from_a_complete_environment() -> None:
         ({"LIVE_HA_PAUSE": "soon"}, "LIVE_HA_PAUSE"),
         ({"LIVE_HA_PAUSE": "-1"}, "LIVE_HA_PAUSE"),
         ({"LIVE_HA_PAUSE": "9999"}, "LIVE_HA_PAUSE"),
+        ({"LIVE_HA_COUNTDOWN": "soon"}, "LIVE_HA_COUNTDOWN"),
+        ({"LIVE_HA_COUNTDOWN": "61"}, "LIVE_HA_COUNTDOWN"),
+        ({"LIVE_HA_TIMEOUT": "soon"}, "LIVE_HA_TIMEOUT"),
+        ({"LIVE_HA_TIMEOUT": "500ms"}, "LIVE_HA_TIMEOUT"),
+        ({"LIVE_HA_TIMEOUT": "121"}, "LIVE_HA_TIMEOUT"),
+        ({"LIVE_HA_TIMEOUT": "010"}, "LIVE_HA_TIMEOUT"),
+        ({"LIVE_HA_TIMEOUT": "1e3"}, "LIVE_HA_TIMEOUT"),
+        ({"LIVE_HA_BLACKHOLE_URL": "https://ha.example.invalid:8123"}, "LIVE_HA_BLACKHOLE_URL"),
+        ({"LIVE_HA_BLACKHOLE_URL": "https://ha.example.invalid:8123/"}, "LIVE_HA_BLACKHOLE_URL"),
     ],
 )
 def test_config_refuses_a_bad_environment(mutation: dict[str, str], fragment: str) -> None:
     cfg, reason = LiveConfig.from_env(_env(**mutation))
     assert cfg is None and fragment in reason
     assert TOKEN not in reason
+
+
+def test_blackhole_may_not_equal_the_prefix_url() -> None:
+    cfg, reason = LiveConfig.from_env(
+        _env(
+            LIVE_HA_PREFIX_BASE_URL="https://proxy.example.invalid/ha",
+            LIVE_HA_BLACKHOLE_URL="https://proxy.example.invalid/ha",
+        )
+    )
+    assert cfg is None and "LIVE_HA_BLACKHOLE_URL" in reason
+
+
+@pytest.mark.parametrize(
+    "value,seconds",
+    [("10s", 10.0), ("1m", 60.0), ("10", 10.0), ("1.5s", 1.5), ("1500ms", 1.5), ("120", 120.0)],
+)
+def test_timeout_is_parsed_with_the_interface_duration_grammar(value: str, seconds: float) -> None:
+    cfg, reason = LiveConfig.from_env(_env(LIVE_HA_TIMEOUT=value))
+    assert cfg is not None, reason
+    assert cfg.timeout == value and cfg.timeout_seconds == seconds
+
+
+def test_the_default_timeout_and_countdown() -> None:
+    cfg, _ = LiveConfig.from_env(_env())
+    assert cfg is not None
+    assert cfg.timeout_seconds == 10.0 and cfg.countdown == 10.0
+
+
+def test_any_live_variable_is_detected_even_when_empty() -> None:
+    assert not support.any_live_variable({"HA_LIVE_TOKEN": TOKEN, "PATH": "/bin"})
+    assert support.any_live_variable({"LIVE_HA_PAUSE": ""})
+
+
+def test_countdown_announces_ctrl_c_and_waits(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cfg, _ = LiveConfig.from_env(_env(LIVE_HA_COUNTDOWN="2.5"))
+    assert cfg is not None
+    slept: list[float] = []
+    monkeypatch.setattr(support.time, "sleep", slept.append)
+    support.countdown(cfg)
+    assert "Ctrl-C aborts" in capsys.readouterr().out
+    assert sum(slept) == pytest.approx(2.5)
 
 
 def test_config_never_shows_the_token_or_the_host() -> None:
@@ -245,6 +305,88 @@ def test_raw_post_notify_refuses_command_words_and_sends_nothing(word: str) -> N
         assert ha.requests == [] and ha.connections == 0
 
 
+OBFUSCATED = [
+    "tts\x00",
+    "t\x00ts",
+    "tts\u200b",
+    "\u200btts",
+    "tts\ufeff",
+    "tts\xad",
+    "clear_\u200bnotification",
+    "TTS\u200b",
+]
+
+
+@pytest.mark.parametrize("word", OBFUSCATED, ids=lambda w: ascii(w))
+def test_raw_post_notify_refuses_words_the_tool_would_see_after_sanitizing(word: str) -> None:
+    with FakeHA(token=TOKEN) as ha:
+        cfg = _config(ha.base_url)
+        for body in ({"message": word}, {"title": word, "message": "x"}):
+            with pytest.raises(CommandWordRefused):
+                support.raw_post_notify(cfg, body)
+        assert ha.requests == [] and ha.connections == 0
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"message": "x", "tts_text": "hello"},
+        {"message": "x", "command": "tts"},
+        {"message": "x", "target": ["a"]},
+        {"message": "x", "data": {"tts_text": "hello"}},
+        {"message": "x", "data": {"url": "https://a.example", "actions": []}},
+        {"message": "x", "data": "tts"},
+        {"message": "x", "data": {"tag": ["a"]}},
+        {"title": "t"},
+    ],
+    ids=lambda b: ",".join(b),
+)
+def test_raw_post_notify_allows_only_the_known_body_and_data_keys(body: dict[str, object]) -> None:
+    with FakeHA(token=TOKEN) as ha:
+        with pytest.raises(CommandWordRefused):
+            support.raw_post_notify(_config(ha.base_url), body)
+        assert ha.connections == 0
+
+
+def test_raw_post_notify_sends_title_message_and_the_three_data_keys() -> None:
+    body = {"title": "t", "message": "m", "data": {"tag": "a", "url": "u", "clickAction": "c"}}
+    with FakeHA(token=TOKEN) as ha:
+        assert support.raw_post_notify(_config(ha.base_url), body).status == 200
+        assert json.loads(ha.requests[0].body) == body
+
+
+def test_raw_request_refuses_a_post_to_a_notify_service_and_allows_a_get() -> None:
+    with FakeHA(token=TOKEN) as ha:
+        cfg = _config(ha.base_url)
+        for path in (f"/api/services/notify/{SERVICE}", "/api/services/NOTIFY/x"):
+            with pytest.raises(NotifyPostRefused):
+                support._raw_request(cfg, "POST", path, body={"message": "tts"})  # pyright: ignore[reportPrivateUsage]
+        assert ha.connections == 0
+        assert support.raw_get(cfg, "/api/").status == 200
+        assert not hasattr(support, "raw_request")
+
+
+def test_every_family_word_is_flagged_and_every_family_has_a_word() -> None:
+    from ha_notice.payload import check_command_keyword
+    from tests.live.test_live_commands import FAMILY_WORDS
+
+    assert all(check_command_keyword(word) for word in FAMILY_WORDS)
+    for family in ("tts", "command_", "kiosk_", "update_", "clear_", "remove_", "request_"):
+        assert any(w.startswith(family) for w in FAMILY_WORDS), family
+
+
+def test_trust_location_state(tmp_path: Path, self_signed_cert: tuple[Path, Path]) -> None:
+    cert, _ = self_signed_cert
+    junk = tmp_path / "junk.pem"
+    junk.write_text("not a certificate\n", encoding="utf-8")
+    state = support.trust_location_state
+    assert state("", directory=False) == "unset"
+    assert state(str(tmp_path / "missing"), directory=False) == "missing"
+    assert state(str(cert), directory=False) == "exists, loads"
+    assert state(str(junk), directory=False) == "exists, does not load"
+    assert state(str(tmp_path), directory=True) == "exists, loads"
+
+
 def test_raw_post_notify_refuses_a_non_string_message() -> None:
     with FakeHA(token=TOKEN) as ha:
         with pytest.raises(CommandWordRefused):
@@ -274,6 +416,13 @@ def test_raw_notify_sends_the_token_only_in_the_authorization_header() -> None:
         assert TOKEN not in request.path and TOKEN.encode() not in request.body
 
 
+def test_raw_post_notify_can_send_a_chosen_token() -> None:
+    with FakeHA(token=TOKEN) as ha:
+        reply = support.raw_post_notify(_config(ha.base_url), {"message": "x"}, token="wrong")
+        assert reply.status == 401
+        assert ha.requests[0].header("Authorization") == "Bearer wrong"
+
+
 def test_position_text_has_the_exact_length_and_readable_positions() -> None:
     for size in (1, 6, 7, 1000, 100000):
         assert len(support.position_text(size)) == size
@@ -292,12 +441,42 @@ def test_run_tool_environment_holds_only_the_token_variable(tmp_path: Path) -> N
 # --- the live tests themselves, run against the fake Home Assistant --------------------------
 
 
-def _inner(tmp: Path, args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    full = {"LIVE_HA_PAUSE": "0", "LIVE_HA_TIMEOUT": "2s", "HA_LIVE_TOKEN": TOKEN}
+def _inner(
+    tmp: Path, args: list[str], env: dict[str, str], markexpr: str = "live"
+) -> subprocess.CompletedProcess[str]:
+    full = {
+        "LIVE_HA_PAUSE": "0",
+        "LIVE_HA_COUNTDOWN": "0",
+        "LIVE_HA_TIMEOUT": "2s",
+        "HA_LIVE_TOKEN": TOKEN,
+    }
     full.update(env)
     full["LIVE_HA_TOKEN_ENV"] = "HA_LIVE_TOKEN"
     full["LIVE_HA_SERVICE"] = SERVICE
-    return _pytest(tmp, ["-m", "live", "-s", "-rs", "-q", *args], **full)
+    return _pytest(tmp, ["-m", markexpr, "-s", "-rs", "-q", *args], **full)
+
+
+@contextmanager
+def _blackhole() -> Iterator[str]:
+    """A loopback address whose connect never completes: a listener with a full accept queue."""
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(0)
+        port = listener.getsockname()[1]
+        fillers: list[socket.socket] = []
+        try:
+            for _ in range(4):
+                filler = socket.socket()
+                filler.setblocking(False)
+                fillers.append(filler)
+                try:
+                    filler.connect(("127.0.0.1", port))
+                except BlockingIOError:
+                    pass
+            yield f"http://127.0.0.1:{port}"
+        finally:
+            for filler in fillers:
+                filler.close()
 
 
 def _titles(ha: FakeHA) -> list[str]:
@@ -309,13 +488,24 @@ def _titles(ha: FakeHA) -> list[str]:
     return out
 
 
+def _message_lengths(ha: FakeHA) -> dict[str, int]:
+    """The message length of every authorized POST, keyed by the end of its title."""
+    lengths: dict[str, int] = {}
+    for request in ha.requests:
+        if request.method == "POST" and request.header("Authorization") == f"Bearer {TOKEN}":
+            body = json.loads(request.body)
+            lengths[str(body.get("title", "")).split(" ", 4)[-1]] = len(body["message"])
+    return lengths
+
+
+@pytest.mark.long_alarm
 def test_live_tests_run_against_the_fake_home_assistant(tmp_path: Path) -> None:
     from tests.live.test_live_commands import FAMILY_WORDS
 
     with (
         FakeHA(token=TOKEN, services={SERVICE, "other"}) as ha,
         FakeHA(token=TOKEN, prefix="p", services={SERVICE}) as prefixed,
-        FakeHA(script=[Reply(stall_before_read=True)]) as stalled,
+        _blackhole() as blackhole,
     ):
         done = _inner(
             tmp_path,
@@ -325,17 +515,21 @@ def test_live_tests_run_against_the_fake_home_assistant(tmp_path: Path) -> None:
                 "LIVE_HA_ALLOW_INSECURE_HTTP": "1",
                 "LIVE_HA_PREFIX_BASE_URL": prefixed.base_url + "/p",
                 "LIVE_HA_OTHER_SERVICE": "other",
-                "LIVE_HA_BLACKHOLE_URL": stalled.base_url,
+                "LIVE_HA_BLACKHOLE_URL": blackhole,
             },
         )
         report = done.stdout + done.stderr
         assert done.returncode == 0, report
-        assert "13 passed, 2 skipped" in report, report
+        assert "12 passed, 3 skipped" in report, report
         assert "opt-in only" in report and "needs an https LIVE_HA_BASE_URL" in report
+        assert "no TLS chain to verify" in report
         assert TOKEN not in report
         # instructions are printed, numbered, with the item and the run marker
         assert "WHAT YOU SHOULD SEE ON THE PHONE:" in report and "  1. " in report
         assert "[settles V20]" in report and "ha-notice live test " in report
+        # the wrong token was answered 401 for both raw requests
+        assert "raw GET /api/ with a wrong token: HTTP 401" in report
+        assert "raw POST notify with a wrong token: HTTP 401" in report
         # no command word reached the fake without the opt-in
         sent = [json.loads(r.body).get("message") for r in ha.requests if r.method == "POST"]
         assert not [m for m in sent if m in FAMILY_WORDS]
@@ -343,9 +537,22 @@ def test_live_tests_run_against_the_fake_home_assistant(tmp_path: Path) -> None:
         tagged = [json.loads(r.body) for r in ha.requests if r.method == "POST"]
         tags = [b["data"]["tag"] for b in tagged if "data" in b and "tag" in b["data"]]
         assert len(tags) == 2 and tags[0] == tags[1]
-        # the link test: url and clickAction both
-        links = [b["data"] for b in tagged if "data" in b and "url" in b["data"]]
-        assert len(links) == 1 and links[0]["clickAction"] == links[0]["url"]
+        # the link test: both keys from the tool, then each key alone from the raw sender
+        datas = [
+            b["data"]
+            for b in tagged
+            if "data" in b and ("url" in b["data"] or "clickAction" in b["data"])
+        ]
+        assert len(datas) == 3
+        assert datas[0]["clickAction"] == datas[0]["url"]
+        assert set(datas[1]) == {"url"} and set(datas[2]) == {"clickAction"}
+        # sizes: raw 1000/10000/100000; the tool cut 100000 characters to its two caps
+        lengths = _message_lengths(ha)
+        assert lengths["raw 1000"] == 1000
+        assert lengths["raw 10000"] == 10000
+        assert lengths["raw 100000"] == 100000
+        assert lengths["tool max_chars 1000"] == 1000
+        assert lengths["tool max_chars 2000"] == 1998
         # markup sent literally; every title carries the unique marker except the test message
         assert any(
             b.get("message") == '<b>x</b> <a href="https://example.org">y</a>' for b in tagged
@@ -353,31 +560,190 @@ def test_live_tests_run_against_the_fake_home_assistant(tmp_path: Path) -> None:
         assert all(t.startswith("ha-notice live test ") or t == "ha-notice" for t in _titles(ha)), (
             _titles(ha)
         )
-        # the prefixed fake got the probe and one send; the stalled one got the dummy token only
+        # the prefixed fake got the probe and one send
         assert [r.method for r in prefixed.requests] == ["GET", "POST"]
-        assert all(TOKEN.encode() not in raw for raw in stalled.received)
+        assert "tool result after" in report and "network_error" in report
 
 
-def test_self_signed_and_command_tests_run_against_a_tls_fake(
+def test_self_signed_and_default_ca_tests_run_against_a_tls_fake(
+    tmp_path: Path, self_signed_cert: tuple[Path, Path]
+) -> None:
+    cert, key = self_signed_cert
+    with FakeHA(token=TOKEN, certfile=cert, keyfile=key, services={SERVICE}) as ha:
+        done = _inner(
+            tmp_path,
+            ["tests/live", "-k", "self_signed or default_ca"],
+            {"LIVE_HA_BASE_URL": ha.base_url, "LIVE_HA_CA_FILE": str(cert)},
+        )
+        report = done.stdout + done.stderr
+        assert done.returncode == 0, report
+        assert "2 passed" in report and TOKEN not in report
+        assert "fallback " in report and "probe with system trust only" in report
+
+
+def _command_env(ha: FakeHA, cert: Path) -> dict[str, str]:
+    return {
+        "LIVE_HA_BASE_URL": ha.base_url,
+        "LIVE_HA_CA_FILE": str(cert),
+        "LIVE_HA_ALLOW_COMMANDS": "1",
+    }
+
+
+def test_command_words_are_sent_only_under_dash_m_live_commands(
     tmp_path: Path, self_signed_cert: tuple[Path, Path]
 ) -> None:
     from tests.live.test_live_commands import FAMILY_WORDS
 
     cert, key = self_signed_cert
     with FakeHA(token=TOKEN, certfile=cert, keyfile=key, services={SERVICE}) as ha:
-        done = _inner(
-            tmp_path,
-            ["tests/live", "-k", "self_signed or command_word"],
-            {
-                "LIVE_HA_BASE_URL": ha.base_url,
-                "LIVE_HA_CA_FILE": str(cert),
-                "LIVE_HA_ALLOW_COMMANDS": "1",
-            },
-        )
+        done = _inner(tmp_path, ["tests/live"], _command_env(ha, cert), markexpr="live_commands")
         report = done.stdout + done.stderr
         assert done.returncode == 0, report
-        assert "2 passed" in report and TOKEN not in report
+        assert "1 passed" in report and TOKEN not in report
         assert "SENDING COMPANION-APP COMMAND WORDS" in report
+        assert "Ctrl-C aborts" in report and "unverified" in report
+        assert report.index("Ctrl-C aborts") < report.index("sending 1/")
+        for word in ("request_location_update", "command_screen_on", "tts"):
+            assert word in report
         messages = [json.loads(r.body).get("message") for r in ha.requests if r.method == "POST"]
         assert [m for m in messages if m in FAMILY_WORDS] == list(FAMILY_WORDS)
         assert re.fullmatch(r"[0-9a-f]{6}: update_widgets", str(messages[-1]))
+
+
+def test_command_words_are_not_sent_by_the_plain_live_run_even_with_the_opt_in(
+    tmp_path: Path, self_signed_cert: tuple[Path, Path]
+) -> None:
+    cert, key = self_signed_cert
+    with FakeHA(token=TOKEN, certfile=cert, keyfile=key, services={SERVICE}) as ha:
+        done = _inner(tmp_path, ["tests/live", "-k", "command_word"], _command_env(ha, cert))
+        report = done.stdout + done.stderr
+        assert done.returncode == 0, report
+        assert "1 skipped" in report and "-m live_commands" in report
+        assert ha.requests == []
+
+
+# --- the token and the configuration in a failing live run -----------------------------------
+
+CANARY = "HA_canary_0123456789_zzz"
+LEAK_TESTS = """
+import os
+import subprocess
+
+from tests.live import support
+
+
+def _cfg():
+    env = {
+        "LIVE_HA_BASE_URL": os.environ["CANARY_URL"],
+        "LIVE_HA_SERVICE": "canary_service_x",
+        "LIVE_HA_TOKEN_ENV": "HA_CANARY",
+        "HA_CANARY": os.environ["HA_CANARY"],
+        "LIVE_HA_ALLOW_INSECURE_HTTP": "1",
+    }
+    cfg, reason = support.LiveConfig.from_env(env)
+    assert cfg is not None, reason
+    return cfg
+
+
+def test_raw_error():
+    cfg = _cfg()
+    support.raw_get(cfg, "/api/")
+
+
+def test_tool_timeout(tmp_path):
+    cfg = _cfg()
+    support.run_tool(tmp_path / "c.yaml", ["validate"], cfg, limit_s=0.0001)
+
+
+def test_tool_prints_the_token(tmp_path, monkeypatch):
+    cfg = _cfg()
+    leaked = subprocess.CompletedProcess([], 0, os.environ["HA_CANARY"].encode(), b"")
+    monkeypatch.setattr(support, "_spawn", lambda *args: leaked)
+    support.run_tool(tmp_path / "c.yaml", ["validate"], cfg)
+"""
+
+
+def test_failures_with_showlocals_never_print_the_token(tmp_path: Path) -> None:
+    with socket.socket() as sock:  # a loopback port with nothing listening
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    (tmp_path / "test_leak.py").write_text(LEAK_TESTS, encoding="utf-8")
+    done = _pytest(
+        tmp_path,
+        ["-o", "addopts=", "-l", "--showlocals", "--tb=long", "-q", str(tmp_path / "test_leak.py")],
+        CANARY_URL=f"http://127.0.0.1:{port}",
+        HA_CANARY=CANARY,
+    )
+    report = done.stdout + done.stderr
+    assert done.returncode == 1 and "3 failed" in report, report
+    assert "RawRequestError: ConnectionRefusedError" in report
+    assert "ToolTimeout" in report and "the tool printed the token" in report
+    for secret in (CANARY, "canary_service_x", f"127.0.0.1:{port}", "Bearer"):
+        assert secret not in report, secret
+
+
+def test_a_partly_set_or_invalid_configuration_fails_with_the_reason(tmp_path: Path) -> None:
+    target = "tests/live/test_live_edge.py::test_probe_body_shape"
+    cases = [
+        ({"LIVE_HA_BASE_URL": "http://127.0.0.1:9"}, "LIVE_HA_SERVICE"),
+        (
+            {
+                "LIVE_HA_BASE_URL": "http://127.0.0.1:9",
+                "LIVE_HA_SERVICE": SERVICE,
+                "LIVE_HA_TOKEN_ENV": "HA_LIVE_TOKEN",
+                "LIVE_HA_PAUSE": "soon",
+                "HA_LIVE_TOKEN": TOKEN,
+            },
+            "LIVE_HA_PAUSE",
+        ),
+        (
+            {
+                "LIVE_HA_BASE_URL": "http://127.0.0.1:9",
+                "LIVE_HA_SERVICE": SERVICE,
+                "LIVE_HA_TOKEN_ENV": "NOT_HA",
+                "NOT_HA": TOKEN,
+            },
+            "HA_[A-Z0-9_]",
+        ),
+    ]
+    for env, fragment in cases:
+        done = _pytest(tmp_path, ["-m", "live", "-s", "-rs", "-q", target], **env)
+        report = done.stdout + done.stderr
+        assert done.returncode == 1 and "1 error" in report, report
+        assert "configuration is invalid" in report and fragment in report
+        assert TOKEN not in report and "127.0.0.1" not in report
+
+
+# --- mutations: the inner run must fail when the live assertions are not met -----------------
+
+
+def _inner_fails(tmp: Path, keyword: str, base_url: str, extra: dict[str, str]) -> str:
+    done = _inner(
+        tmp,
+        ["tests/live", "-k", keyword],
+        {"LIVE_HA_BASE_URL": base_url, "LIVE_HA_ALLOW_INSECURE_HTTP": "1", **extra},
+    )
+    report = done.stdout + done.stderr
+    assert done.returncode == 1 and "1 failed" in report, report
+    assert TOKEN not in report
+    return report
+
+
+def test_a_healthy_host_as_the_blackhole_fails_the_unreachable_test(tmp_path: Path) -> None:
+    with FakeHA(token=TOKEN, services={SERVICE}) as ha, FakeHA(token=TOKEN) as healthy:
+        report = _inner_fails(
+            tmp_path, "unreachable", ha.base_url, {"LIVE_HA_BLACKHOLE_URL": healthy.base_url}
+        )
+        assert "auth_required" in report
+
+
+def test_a_wrong_token_answered_500_fails_the_wrong_token_test(tmp_path: Path) -> None:
+    with FakeHA(token=TOKEN, script=[Reply(status=500)] * 20) as ha:
+        _inner_fails(tmp_path, "wrong_token", ha.base_url, {})
+
+
+def test_a_wrong_token_probe_that_is_not_auth_required_fails_the_test(tmp_path: Path) -> None:
+    script = [Reply(status=401)] * 2 + [Reply(status=500)] * 20  # raw GET, raw POST, then tool
+    with FakeHA(token=TOKEN, script=script) as ha:
+        report = _inner_fails(tmp_path, "wrong_token", ha.base_url, {})
+        assert "upstream_error" in report
