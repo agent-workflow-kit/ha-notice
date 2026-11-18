@@ -53,8 +53,8 @@ def test_module_map_module_imports(name: str) -> None:
     assert importlib.import_module(f"ha_notice.{name}")
 
 
-def test_runtime_dependencies_are_only_pydantic_and_pyyaml() -> None:
-    allowed = {"pydantic", "pyyaml"}
+def test_runtime_dependencies_are_only_pyyaml() -> None:
+    allowed = {"pyyaml"}
     for dep in PYPROJECT["project"]["dependencies"]:
         name = dep.split("[")[0]
         for sep in "<>=!~; ":
@@ -63,7 +63,7 @@ def test_runtime_dependencies_are_only_pydantic_and_pyyaml() -> None:
 
 
 def test_source_imports_only_stdlib_and_allowed_dependencies() -> None:
-    allowed = {"ha_notice", "pydantic", "yaml"}
+    allowed = {"ha_notice", "yaml"}
     for path in (ROOT / "src" / "ha_notice").glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Import):
