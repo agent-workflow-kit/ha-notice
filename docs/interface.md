@@ -231,7 +231,7 @@ Canonical call: `ha-notice send --stdin-json --json --actor auto:<name> [--dedup
 |---|---|---|
 | 0 | sent | Record it. |
 | 22 | disabled, a successful no-op | Nothing. A shell caller writes `rc=$?; [ "$rc" = 22 ] && rc=0`. |
-| 20 | the payload was refused | Do not retry; surface once per reason. After `link_invalid` or `link_scheme` a caller may retry once without `link`, putting the URL in the message. |
+| 20 | the payload was refused | Do not retry; surface once per reason. After `link_invalid` or `link_scheme` a caller may retry once without `link` (no pointer, or pointer `/link`) or without the action named by the pointer `/actions/<i>/uri`, putting the URL in the message. |
 | 12 (false, false) | not sent; it will fail again until a person changes the config or the credential | Do not retry; surface once per code and destination. |
 | 12 (true, false) | not sent, worth retrying | Retry with the caller's own backoff and cap. What the tool did first depends on the code: `rate_limited` was retried inside the deadline after 2 s and 4 s as far as the deadline allowed (`retry_after_s` is the tool's own last wait, not a server hint); `network_error` was retried once after 2 s when the deadline allowed; `unavailable` (the input did not arrive in time) was not retried. |
 | 12 `unavailable` | nothing was sent: the input did not arrive before the deadline (`details.phase` `input`) | Retry later, with the same cap. |

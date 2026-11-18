@@ -84,6 +84,35 @@
           "group": "awkit"
         }
       }
+    },
+    "dry_run_full_data_actions": {
+      "outcome": "dry_run",
+      "tool": "ha-notice",
+      "level": "info",
+      "truncated": false,
+      "bytes": 42,
+      "duration_ms": 120,
+      "http_status": null,
+      "tag_set": false,
+      "dedupe_key": null,
+      "warnings": [],
+      "rendered": {
+        "title": "WARN: t",
+        "message": "m",
+        "data": {
+          "url": "https://a.example/x",
+          "clickAction": "https://a.example/x",
+          "tag": "awkit-0123456789abcdef01234567",
+          "group": "awkit",
+          "actions": [
+            {
+              "action": "URI",
+              "title": "Open",
+              "uri": "https://a.example/x"
+            }
+          ]
+        }
+      }
     }
   },
   "invalid": {
@@ -522,6 +551,45 @@
         "rendered",
         "data",
         "tag"
+      ],
+      "keyword": "pattern"
+    },
+    "rendered_action_uri_uppercase_scheme": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "rendered": {
+          "title": "WARN: t",
+          "message": "m",
+          "data": {
+            "url": "https://a.example/x",
+            "clickAction": "https://a.example/x",
+            "tag": "awkit-0123456789abcdef01234567",
+            "group": "awkit",
+            "actions": [
+              {
+                "action": "URI",
+                "title": "Open",
+                "uri": "HTTPS://a.example/x"
+              }
+            ]
+          }
+        }
+      },
+      "path": [
+        "rendered",
+        "data",
+        "actions",
+        0,
+        "uri"
       ],
       "keyword": "pattern"
     }

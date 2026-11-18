@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ha-notice/notification.json",
   "title": "ha-notice notification (input)",
-  "description": "The JSON object read by send --stdin-json or --file. Unknown fields exit 20 invalid_payload. Sanitizing, the cut of a title to 256 characters after sanitizing, the empty-message check (message has no minLength here; an absent message is also empty_message), the command-keyword check the exact link rule (also for each action uri), the 64 character limit of an action title and the 3 action limit are applied by the tool and are not expressible here.",
+  "description": "The JSON object read by send --stdin-json or --file. Unknown fields exit 20 invalid_payload. Sanitizing, the cut of a title to 256 characters after sanitizing, the empty-message check (message has no minLength here; an absent message is also empty_message), the command-keyword check, the exact link rule (also for each action uri), the 64 character limit of an action title and the 3 action limit are applied by the tool and are not expressible here.",
   "type": "object",
   "properties": {
     "title": {

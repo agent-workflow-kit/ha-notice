@@ -120,7 +120,7 @@
                   "uri": {
                     "type": "string",
                     "maxLength": 1024,
-                    "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[\\x21-\\x7e]+(?![\\s\\S])"
+                    "pattern": "^https?://[\\x21-\\x7e]+(?![\\s\\S])"
                   }
                 }
               }

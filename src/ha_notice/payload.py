@@ -61,8 +61,9 @@ _NO_POINTER = frozenset({"empty_message", "command_keyword", "link_scheme"})
 
 class PayloadError(Exception):
     """A refused notification (exit 20). ``reason`` is ``invalid_payload``, ``empty_message``,
-    ``command_keyword``, ``link_invalid`` or ``link_scheme`` (only ``invalid_payload`` and the
-    ``link_hosts`` form of ``link_invalid`` have details);
+    ``command_keyword``, ``link_invalid`` or ``link_scheme`` (``invalid_payload``, the
+    ``link_hosts`` form of ``link_invalid`` and any refusal of an action ``uri`` have details;
+    the top-level ``link_scheme`` has none);
     ``field`` is the offending field name (``None`` for the document itself) and is only ever
     turned into a pointer through ``safe_pointer``. Neither is built from an input value except
     the field name, which is never printed raw."""
@@ -79,7 +80,8 @@ class PayloadError(Exception):
     def pointer(self) -> str | None:
         """``details.pointer``; ``None`` for ``empty_message``, ``command_keyword``,
         ``link_scheme`` and a ``link_invalid`` without a field (a link rule failure; only the
-        ``link_hosts`` refusal, which names the field ``link``, has the pointer ``/link``)."""
+        ``link_hosts`` refusal, which names the field ``link``, has the pointer ``/link``). An
+        action ``uri`` refusal, whatever its reason, carries ``/actions/<i>/uri``."""
         if self._pointer is not None:
             return self._pointer
         if self.reason in _NO_POINTER or (self.reason == "link_invalid" and self.field is None):
@@ -208,6 +210,15 @@ def _action_pointer(index: int, name: str | None = None) -> str:
     return base if name is None else base + safe_pointer(name)
 
 
+def _uri_reason(uri: str, link_hosts: Sequence[str] | None) -> str | None:
+    """The link rule shared by ``link`` and an action ``uri``: the rule's own refusal reason, else
+    ``link_invalid`` when ``link_hosts`` is set and the host does not match, else ``None``."""
+    reason = link_reason(uri)
+    if reason is None and link_hosts is not None and not link_host_allowed(uri, link_hosts):
+        return "link_invalid"
+    return reason
+
+
 def _validate_action(index: int, item: object, link_hosts: Sequence[str] | None) -> Action:
     """One action: an object with exactly the keys ``title`` and ``uri`` (unknown keys: the
     smallest name; both required). Every refusal is ``invalid_payload`` with pointer
@@ -232,9 +243,7 @@ def _validate_action(index: int, item: object, link_hosts: Sequence[str] | None)
     uri = item.get("uri")
     if type(uri) is not str:
         raise PayloadError("invalid_payload", pointer=uri_pointer)
-    reason = link_reason(uri)
-    if reason is None and link_hosts is not None and not link_host_allowed(uri, link_hosts):
-        reason = "link_invalid"
+    reason = _uri_reason(uri, link_hosts)
     if reason is not None:
         raise PayloadError(reason, pointer=uri_pointer)
     return Action(title=title, uri=uri)
@@ -292,7 +301,7 @@ def validate_notification(obj: object, link_hosts: Sequence[str] | None = None) 
         reason = link_reason(link)
         if reason is not None:
             raise PayloadError(reason)  # no details (docs/interface.md, details by reason)
-        if link_hosts is not None and not link_host_allowed(link, link_hosts):
+        if _uri_reason(link, link_hosts) is not None:
             raise PayloadError("link_invalid", "link")  # the one link refusal with details
     actions = _validate_actions(obj["actions"], link_hosts) if "actions" in obj else ()
     if message is None or is_empty_text(message):
