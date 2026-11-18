@@ -568,3 +568,31 @@ def test_repeated_loads_give_the_same_result(gw: FakeGateway, home: Path) -> Non
     first, second = config.load(gw, None), config.load(gw, None)
     assert first.values == second.values
     assert (first.timeout, first.max_chars, first.default_group) == (60.0, 300, "g")
+
+
+# --- level_prefix is the sanitizer's title rule (issue #16) ----------------------------------
+
+
+def _golden_prefix(value: str) -> bool:
+    from ha_notice.payload import has_lone_surrogate, is_empty_text, sanitize_title
+
+    if has_lone_surrogate(value) or len(value) > 16:
+        return False
+    return sanitize_title(value) == value and (value == "" or not is_empty_text(value))
+
+
+def test_prefix_ok_equals_the_sanitizer_over_every_code_point() -> None:
+    # Alone, and between two letters (so a mark, a space or a joiner has a neighbour).
+    for n in range(0x110000):
+        ch = chr(n)
+        for value in (ch, "a" + ch + "b"):
+            assert config.prefix_ok(value) == _golden_prefix(value), hex(n)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "a", "a" * 16, "a" * 17, " a", "a ", "a  b", "a\tb", "a\nb", "́", "á", "\ud800"]
+    + ["😀", "\U0001f600" * 16, "\U0001f600" * 17, "WARN:", "é" * 16],
+)
+def test_prefix_ok_golden_on_a_table(value: str) -> None:
+    assert config.prefix_ok(value) == _golden_prefix(value)
