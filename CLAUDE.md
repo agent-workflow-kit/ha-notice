@@ -1,6 +1,6 @@
 # CLAUDE.md: ha-notice
 
-ha-notice is an awkit L1 primitive: send one notification through the Home Assistant REST notify service. It must work fully standalone (no harness, bus, shared library or shared contracts package). Status: design done, 0.1.0-design.
+ha-notice is an awkit L1 primitive: send one notification through the Home Assistant REST notify service. It must work fully standalone (no harness, bus, shared library or shared contracts package). Status: implemented; see CHANGELOG.md for the current version.
 
 **Naming.** Tools have no shared prefix; see design guide §1 naming rules.
 
@@ -28,7 +28,7 @@ ha-notice is an awkit L1 primitive: send one notification through the Home Assis
 
 ## Workflow
 
-1. The design is done (interface 0.1.0-design). Implement the GitHub issues in plan order, test-first; `docs/interface.md` wins over any other document.
+1. The interface is in `docs/interface.md` and wins over any other document; change it first, then the code and tests (interface-first rule). Work from the GitHub issues, test-first.
 2. There is no audit file and there are no hooks; do not add either without an interface change.
 
 ## Repository workflow
