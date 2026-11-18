@@ -8,7 +8,12 @@ rendered. With ``--dry-run`` the body is printed and the exit code is 0: no dest
 no network, no state directory, no log. The environment is never consulted here.
 
 TODO(#27): everything after ``deliver`` is called (token, POST, result mapping, output, log).
-TODO(#26): signals during input (exit 128+N); the deadline below is only the input deadline.
+Signals (``signals.py``): a signal before the send starts is exit 128+N with no envelope and no
+log record (a 128+N exit is never logged), noticed at the checkpoints below
+(``inv.signals.check()``) and, during input, through ``remaining`` returning 0. TODO(#27):
+during the send the stop path (``SignalState.stopped`` as
+``run_with_deadline(stop=...)``) decides by the gate state; that result, log step
+included, follows docs/interface.md (Deadline).
 """
 
 from __future__ import annotations
@@ -60,7 +65,14 @@ class Plan:
 
 
 def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
-    """Steps 5 to 7: token, POST, result mapping, output and log. TODO(#27)."""
+    """Steps 5 to 7: token, POST, result mapping, output and log. TODO(#27).
+
+    TODO(#27): call ``inv.signals.check()`` immediately before the worker starts (step 6); pass
+    ``stop=inv.signals.stopped`` to ``run_with_deadline`` and report the gate's result.
+    When the send reports a result, a result already reported wins over later signals: in the cli
+    ``except`` branch, call ``inv.signals.check()`` only if ``emitted_exit()`` is None.
+    """
+    inv.signals.check()
     return fail(inv.json, "internal", message="command not implemented")
 
 
@@ -79,12 +91,16 @@ def run_send(inv: Invocation) -> int:
     if args is None:
         raise ValueError("send without send arguments")
     gateway = inv.gateway
+    signals = inv.signals
+    signals.check()
 
     # Step 2: config, then the disabled check, then (real send only) the destination.
     try:
         config = load(gateway, inv.config)
     except ConfigError as exc:
+        signals.check()
         return fail(inv.json, "config_invalid", key=exc.key)
+    signals.check()
     if not config.enabled:
         return emit_disabled(inv.json)
     if not inv.dry_run:
@@ -92,14 +108,18 @@ def run_send(inv: Invocation) -> int:
             config.check_destination()
             config.check_ca_file(gateway)
         except ConfigError as exc:
+            signals.check()
             return fail(inv.json, "config_invalid", key=exc.key)
 
     # Step 3: input. The deadline starts here.
     started = gateway.monotonic()
     deadline = started + config.timeout
 
-    def remaining() -> float:
+    def input_left() -> float:
         return max(0.0, deadline - gateway.monotonic())
+
+    # A signal makes it 0, so a blocked read ends; the checks below run before a timeout is mapped.
+    remaining = signals.bound(input_left)
 
     try:
         if args.message is None:
@@ -116,11 +136,15 @@ def run_send(inv: Invocation) -> int:
                 link_hosts=config.link_hosts,
             )
     except PayloadError as exc:
+        signals.check()
         return _refuse(inv.json, exc.to_error())
     except InputTimeout:
+        signals.check()  # a signal reads as a timeout; it wins
         return _refuse(inv.json, input_timeout_error())
     except SourceError:
+        signals.check()
         return fail(inv.json, "usage", message="the --file source cannot be read")
+    signals.check()
     after_input = gateway.monotonic()
     _verbose(inv, "input", started, after_input)
 
@@ -136,6 +160,7 @@ def run_send(inv: Invocation) -> int:
     body = serialize(rendered.body)
     plan = Plan(notification, rendered, body, tag is not None, args.dedupe_key, started)
     _verbose(inv, "render", after_input, gateway.monotonic())
+    signals.check()
     if not inv.dry_run:
         return deliver(inv, config, plan)
     return _print_dry_run(inv, plan)

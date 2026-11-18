@@ -232,6 +232,12 @@ class FakeGateway:
     resolve_calls: list[tuple[str, int]] = field(default_factory=list)
     connections: list[FakeConnection] = field(default_factory=list)
     exits: list[int] = field(default_factory=list)
+    # Signals: ``deliver_signal`` runs the installed handler like the real one (in the calling
+    # thread); ``schedule_signal`` delivers one when the fake clock reaches a time.
+    handlers: dict[int, Callable[[int], None]] = field(default_factory=dict)
+    install_count: int = 0
+    restore_count: int = 0
+    pending_signals: list[tuple[float, int]] = field(default_factory=list)
     _real: gw.RealGateway = field(default_factory=gw.RealGateway)
 
     # Clock
@@ -248,6 +254,25 @@ class FakeGateway:
     def advance(self, seconds: float) -> None:
         if seconds > 0:
             self.now += seconds
+            self._deliver_due_signals()
+
+    def schedule_signal(self, at: float, signum: int) -> None:
+        """Deliver ``signum`` the first time the clock reaches ``at`` (absolute fake time)."""
+        self.pending_signals.append((at, signum))
+
+    def _deliver_due_signals(self) -> None:
+        due = [p for p in self.pending_signals if p[0] <= self.now]
+        self.pending_signals = [p for p in self.pending_signals if p[0] > self.now]
+        for _, signum in due:
+            self.deliver_signal(signum)
+
+    def deliver_signal(self, signum: int) -> bool:
+        """Run the handler installed for ``signum``; False when none is (the OS default acts)."""
+        handler = self.handlers.get(signum)
+        if handler is None:
+            return False
+        handler(signum)
+        return True
 
     # Names
     def resolve(self, host: str, port: int) -> list[AddrInfo]:
@@ -359,6 +384,21 @@ class FakeGateway:
         return conn
 
     # Process
+    def install_signal_handlers(
+        self, signals: Sequence[int], on_signal: Callable[[int], None]
+    ) -> Callable[[], None]:
+        self.install_count += 1
+        ours = {signum: on_signal for signum in signals}
+        self.handlers.update(ours)
+
+        def restore() -> None:
+            self.restore_count += 1
+            for signum, fn in ours.items():
+                if self.handlers.get(signum) is fn:
+                    del self.handlers[signum]
+
+        return restore
+
     def exit_process(self, code: int) -> NoReturn:
         self.exits.append(code)
         raise FakeExit(code)

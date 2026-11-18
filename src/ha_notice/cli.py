@@ -44,6 +44,7 @@ from ha_notice.output import (
     write_text,
 )
 from ha_notice.send import run_send
+from ha_notice.signals import SignalReceived, SignalState, install, signal_exit_code
 
 __all__ = ["dumps", "emit_error", "write_text"]  # re-exported (see output.py)
 
@@ -275,6 +276,7 @@ class Invocation:
     send: SendArgs | None = None
     validate: ValidateArgs | None = None
     progress: Progress = field(default_factory=Progress)
+    signals: SignalState = field(default_factory=SignalState)
 
 
 def resolve_actor(flag: str | None, gateway: Gateway) -> tuple[str, str]:
@@ -335,7 +337,12 @@ def _check_send(args: SendArgs, stdin_is_tty: Callable[[], bool]) -> None:
         raise UsageError("stdin is a terminal")
 
 
-def parse(argv: Sequence[str], env: Mapping[str, str], gateway: Gateway) -> Invocation:
+def parse(
+    argv: Sequence[str],
+    env: Mapping[str, str],
+    gateway: Gateway,
+    signals: SignalState | None = None,
+) -> Invocation:
     """Parse argv and run the step 1 checks. Raises ``UsageError`` or ``_ParserExit``."""
     _precheck(argv)
     ns = build_parser().parse_args(list(argv))
@@ -388,6 +395,7 @@ def parse(argv: Sequence[str], env: Mapping[str, str], gateway: Gateway) -> Invo
         gateway=gateway,
         send=send,
         validate=validate,
+        signals=SignalState() if signals is None else signals,
     )
 
 
@@ -411,10 +419,19 @@ def _validate(inv: Invocation) -> int:
 HANDLERS: dict[str, Callable[[Invocation], int]] = {"send": _send, "validate": _validate}
 
 
-# Exit codes a handler may return (docs/interface.md, Exit codes); 128+N is #26's.
+# Exit codes a handler may return (docs/interface.md, Exit codes); 128+N is SignalReceived's.
 HANDLER_EXIT_CODES = frozenset(
     {EXIT_OK, EXIT_INTERNAL, EXIT_USAGE, EXIT_FAILED, EXIT_REFUSED, EXIT_DISABLED}
 )
+
+
+def _flush_quietly() -> None:
+    """The last flush. A KeyboardInterrupt here (a SIGINT that beat the handler) is ignored: the
+    result was already reported, so the exit code stays."""
+    try:
+        flush_streams()
+    except KeyboardInterrupt:
+        pass
 
 
 def _run(args: list[str], environment: Mapping[str, str], gw: Gateway) -> int:
@@ -425,19 +442,26 @@ def _run(args: list[str], environment: Mapping[str, str], gw: Gateway) -> int:
         return done.status
     except UsageError as err:
         return fail(wants_json(args), "usage", message=err.message)
-    except Exception:  # noqa: BLE001 - e.g. gateway.isatty or login_name; nothing of it is printed
+    except (Exception, SystemExit):  # noqa: BLE001 - e.g. gateway.isatty; nothing of it is printed
         return fail(wants_json(args), "internal")
-    try:
-        code = HANDLERS[inv.command](inv)
-        if type(code) is not int or code not in HANDLER_EXIT_CODES:
-            raise ValueError("a handler returned something that is not an exit code")
-    except Exception:  # noqa: BLE001 - the class and text of the exception are never printed
-        # TODO(#26): BaseException (SystemExit, KeyboardInterrupt) is not caught here; #26 owns
-        # it with the signal handling (exit 128+N, no envelope; the SystemExit text is not printed).
-        done = emitted_exit()
-        if done is not None:  # one envelope per run: the handler already printed its own
-            return done
-        return fail(inv.json, "internal", after_writing=inv.progress.writing)
+    # Installed after parsing: a usage error touches no gateway method. A signal during the parse
+    # has the OS default action (SIGINT: KeyboardInterrupt, mapped in ``main``). The handlers stay
+    # (flag-only) until after the flush, so a late signal cannot kill the process after the result.
+    with install(gw, inv.signals):
+        try:
+            inv.signals.check()
+            code = HANDLERS[inv.command](inv)
+            if type(code) is not int or code not in HANDLER_EXIT_CODES:
+                raise ValueError("a handler returned something that is not an exit code")
+        except (Exception, SystemExit):  # noqa: BLE001 - the class and text are never printed
+            # SignalReceived and KeyboardInterrupt are not caught here: main maps them to 128+N.
+            inv.signals.check()  # a signal wins over whatever it interrupted
+            done = emitted_exit()
+            if done is not None:  # one envelope per run: the handler already printed its own
+                code = done
+            else:
+                code = fail(inv.json, "internal", after_writing=inv.progress.writing)
+        _flush_quietly()
     return code
 
 
@@ -460,7 +484,11 @@ def main(
         environment = dict(os.environ) if env is None else env
         gw = RealGateway() if gateway is None else gateway
         code = _run(args, environment, gw)
+    except SignalReceived as received:  # exit 128+N: no envelope, no log record
+        code = received.code
+    except KeyboardInterrupt:  # SIGINT before the handlers were installed
+        code = signal_exit_code(2)  # 130, the shell's code for SIGINT
     except Exception:  # noqa: BLE001 - last resort
         code = EXIT_INTERNAL
-    flush_streams()
+    _flush_quietly()  # a late SIGINT (handlers gone) must not change the code
     return code

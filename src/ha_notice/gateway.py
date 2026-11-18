@@ -29,6 +29,7 @@ import math
 import os
 import pwd
 import select
+import signal
 import socket
 import ssl
 import stat
@@ -45,11 +46,12 @@ from http.client import (
     UnknownProtocol,
 )
 from ssl import SSLCertVerificationError, SSLContext, SSLError
-from typing import Literal, NoReturn, Protocol
+from typing import Any, Literal, NoReturn, Protocol
 
 __all__ = [
     "SLICE_SECONDS",
     "FILE_CHUNK",
+    "HANDLED_SIGNALS",
     "MAX_CONFIG_ENTRIES",
     "AddrInfo",
     "BadStatusLine",
@@ -80,6 +82,9 @@ __all__ = [
 SLICE_SECONDS = 0.1
 FILE_CHUNK = 64 * 1024
 MAX_CONFIG_ENTRIES = 256
+
+# The signals the tool turns into a flag (interface: Deadline): SIGINT, SIGTERM and SIGHUP.
+HANDLED_SIGNALS: tuple[int, ...] = (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
 
 STATE_DIR_PARTS = (".local", "state", "ha-notice")
 CA_FALLBACK_FILES = (
@@ -217,6 +222,9 @@ class Gateway(Protocol):
     def connect(self, spec: ConnectSpec) -> Connection: ...
 
     # Process
+    def install_signal_handlers(
+        self, signals: Sequence[int], on_signal: Callable[[int], None]
+    ) -> Callable[[], None]: ...
     def exit_process(self, code: int) -> NoReturn: ...
 
 
@@ -725,5 +733,48 @@ class RealGateway:
         return _RealConnection(self, spec)
 
     # --- process
+    def install_signal_handlers(
+        self, signals: Sequence[int], on_signal: Callable[[int], None]
+    ) -> Callable[[], None]:
+        """Route ``signals`` to ``on_signal(signum)`` and return a function that restores the
+        previous handlers (safe to call more than once, also after a partial install).
+
+        ``on_signal`` runs in the main thread between bytecodes, so it must only set a flag: no
+        I/O, no lock, nothing that can raise. Off the main thread nothing is installed (Python
+        allows handlers only there) and the restore function does nothing.
+        """
+        previous: dict[int, Any] = {}
+
+        def handler(signum: int, frame: object) -> None:
+            on_signal(signum)
+
+        def restore() -> None:
+            # Last installed, first restored: SIGINT was installed first, so it is restored last
+            # and a KeyboardInterrupt cannot arise while another handler is still ours. One
+            # failure does not skip the others; the first one is raised afterwards.
+            errors: list[BaseException] = []
+            while previous:
+                signum, old = previous.popitem()
+                try:
+                    signal.signal(signum, signal.SIG_DFL if old is None else old)
+                except BaseException as exc:  # noqa: BLE001 - re-raised below
+                    errors.append(exc)
+            if errors:
+                raise errors[0]
+
+        # SIGINT first: once its handler is in place a KeyboardInterrupt can no longer arrive
+        # between an installation and its record in ``previous``.
+        ordered = sorted(signals, key=lambda signum: signum != signal.SIGINT)
+        try:
+            for signum in ordered:
+                previous[signum] = signal.signal(signum, handler)
+        except ValueError:  # not the main thread: no handler can be installed
+            restore()
+            return lambda: None
+        except BaseException:
+            restore()
+            raise
+        return restore
+
     def exit_process(self, code: int) -> NoReturn:
         os._exit(code)
