@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import http.client
 import socket
 import threading
@@ -151,7 +153,7 @@ def test_exit_process_raises_instead_of_exiting() -> None:
 
 
 def test_state_dir_works_on_a_private_home(tmp_path: Path) -> None:
-    g = FakeGateway()
+    g = FakeGateway(user_id=os.getuid())
     fd = g.open_state_dir(str(tmp_path))
     g.close_fd(fd)
     assert (tmp_path / ".local" / "state" / "ha-notice").is_dir()

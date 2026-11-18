@@ -301,7 +301,7 @@ class FakeGateway:
     def open_state_dir(self, home: str) -> int:
         if self.state_error is not None:
             raise self.state_error
-        return self._real.open_state_dir(home)
+        return _OwnedBy(self.user_id).open_state_dir(home)
 
     def open_state_file(self, dir_fd: int, name: str, *, append: bool = False) -> int:
         return self._real.open_state_file(dir_fd, name, append=append)
@@ -337,6 +337,16 @@ class FakeGateway:
     def exit_process(self, code: int) -> NoReturn:
         self.exits.append(code)
         raise FakeExit(code)
+
+
+class _OwnedBy(gw.RealGateway):
+    """The real state-directory code with the injected uid, so the owner check is the real one."""
+
+    def __init__(self, uid: int) -> None:
+        self._uid = uid
+
+    def uid(self) -> int:
+        return self._uid
 
 
 def private_home(tmp_path: Path) -> str:
