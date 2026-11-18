@@ -23,16 +23,19 @@ Rules kept here (docs/interface.md, Config):
   unchanged, judged by ``payload.sanitize_title`` itself), ``link_hosts`` (1 to 32 lowercase host
   names of at least two labels), ``default_group`` and ``max_chars``. Every pattern is a full
   match (``re.fullmatch``, never ``$``). The error names the key and never the value.
-  TODO(#10): ``base_url``, ``token_env`` and ``ca_file`` grammars.
-- The token is never read here.
+  ``base_url``, ``service``, ``token_env`` and ``ca_file`` follow (issue #10, below).
+- The token is never read by ``load``; ``Config.read_token`` reads it from the injected
+  environment mapping, from the variable ``token_env`` names and no other.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import os.path
 import re
-from collections.abc import Iterator
+import unicodedata
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any
@@ -43,9 +46,22 @@ from ha_notice.gateway import Gateway, HomeLookupError, SourceError
 from ha_notice.output import ErrorResult, build_error, safe_key
 from ha_notice.payload import has_lone_surrogate, is_empty_text, sanitize_title
 
-__all__ = ["DEFAULTS", "KNOWN_KEYS", "MAX_FILE_BYTES", "Config", "ConfigError", "load"]
+__all__ = [
+    "DEFAULTS",
+    "KNOWN_KEYS",
+    "MAX_CA_FILE_BYTES",
+    "MAX_FILE_BYTES",
+    "BaseUrl",
+    "Config",
+    "ConfigError",
+    "CredentialError",
+    "load",
+    "parse_base_url",
+]
 
 MAX_FILE_BYTES = 65536
+MAX_CA_FILE_BYTES = 4 * 1024 * 1024
+TOKEN_MAX_CHARS = 4096
 KNOWN_KEYS = (
     "enabled",
     "base_url",
@@ -97,6 +113,16 @@ class ConfigError(Exception):
         self.key: str = self.error.envelope["error"]["details"]["key"]
 
 
+class CredentialError(Exception):
+    """The token is missing or malformed (exit 12 ``credential_invalid``, ``details.env`` the
+    variable name). Holds the name only, never the value."""
+
+    def __init__(self, env: str) -> None:
+        super().__init__("the credential is missing or invalid")
+        self.env: str = env
+        self.error: ErrorResult = build_error("credential_invalid", env=env)
+
+
 @dataclass
 class Config:
     """The merged known keys that were present (defaults are applied by the users of a key) and
@@ -144,6 +170,69 @@ class Config:
     def level_prefix(self) -> dict[str, str]:
         """The prefix of each of the four levels (a copy)."""
         return {**DEFAULTS["level_prefix"], **self.values.get("level_prefix", {})}
+
+    @property
+    def base_url(self) -> BaseUrl | None:
+        """The parsed ``base_url``, or ``None`` when it is not set."""
+        text = self.values.get("base_url")
+        return None if text is None else parse_base_url(text)
+
+    @property
+    def base_url_text(self) -> str | None:
+        """The normalized ``base_url`` (lowercase scheme and host, no trailing slash)."""
+        parsed = self.base_url
+        return None if parsed is None else parsed.text
+
+    @property
+    def service(self) -> str | None:
+        return self.values.get("service")
+
+    @property
+    def token_env(self) -> str:
+        return str(self.values.get("token_env", DEFAULTS["token_env"]))
+
+    @property
+    def allow_insecure_http(self) -> bool:
+        return bool(self.values.get("allow_insecure_http", DEFAULTS["allow_insecure_http"]))
+
+    @property
+    def ca_file(self) -> str | None:
+        return self.values.get("ca_file")
+
+    def check_destination(self) -> None:
+        """A send needs ``base_url`` and ``service`` (a dry run needs neither). Raises
+        ``ConfigError`` naming the first missing key."""
+        for name in ("base_url", "service"):
+            if name not in self.values:
+                raise ConfigError(name)
+
+    def check_ca_file(self, gateway: Gateway) -> None:
+        """``ca_file``, when set, must be a readable regular file of at most MAX_CA_FILE_BYTES
+        (4 MiB).
+        Only readability is checked here; loading the certificates is #22's. Raises
+        ``ConfigError`` (key ``ca_file``); nothing about the failure is kept."""
+        path = self.ca_file
+        if path is None:
+            return
+        try:
+            data = gateway.read_config(path, MAX_CA_FILE_BYTES)
+        except SourceError:
+            data = None
+        if data is None:  # missing, or any read failure; raised outside the handler
+            raise ConfigError("ca_file")
+
+    def read_token(self, env: Mapping[str, str]) -> str:
+        """The token from the variable named by ``token_env`` in ``env`` (the process environment
+        the CLI was given), trimmed with ``str.strip``: 1 to 4096 characters, each U+0021 to
+        U+007E. Raises ``CredentialError``, which never holds the value."""
+        name = self.token_env
+        if not token_env_ok(name):  # whatever way this Config was built, only HA_ names are read
+            raise CredentialError(name)
+        raw = env.get(name)
+        token = raw.strip() if isinstance(raw, str) else ""
+        if not (1 <= len(token) <= TOKEN_MAX_CHARS and TOKEN_RE.fullmatch(token)):
+            raise CredentialError(name)
+        return token
 
 
 # --- the strict loader -----------------------------------------------------------------------
@@ -305,9 +394,119 @@ def _grammar_ok(key: str, value: Any) -> bool:
         return group_ok(value)
     if key == "level_prefix":
         return all(prefix_ok(v) for v in value.values())
+    if key == "base_url":
+        return parse_base_url(value) is not None
+    if key == "service":
+        return service_ok(value)
+    if key == "token_env":
+        return token_env_ok(value)
+    if key == "ca_file":
+        return ca_file_ok(value)
     if key == "link_hosts":
         return 1 <= len(value) <= LINK_HOSTS_MAX and all(link_host_entry_ok(v) for v in value)
-    return True  # TODO(#10): base_url, token_env, ca_file
+    return True
+
+
+# --- base_url, service, token_env, ca_file (issue #10) ----------------------------------------
+
+BASE_URL_MAX_CHARS = 2048
+# docs/interface.md, Home Assistant edge. Full match only: no character class here matches LF, and
+# ``re.fullmatch`` anchors both ends. ``[0-9]`` and ``[A-Za-z0-9]`` are spelled out (never ``\d`` or
+# ``\w``) so no other script's digits or letters match.
+_BASE_URL_RE = re.compile(
+    r"(?P<scheme>[Hh][Tt][Tt][Pp][Ss]?)://"
+    r"(?P<host>[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*|\[(?P<v6>[0-9A-Fa-f:.]+)\])"
+    r"(?::(?P<port>[0-9]{1,5}))?"
+    r"(?P<prefix>(?:/[A-Za-z0-9._~-]+)*)"
+    r"/*"
+)
+SERVICE_RE = re.compile(r"[a-z0-9_]{1,64}")
+TOKEN_ENV_RE = re.compile(r"HA_[A-Z0-9_]{1,60}")
+TOKEN_RE = re.compile(r"[\x21-\x7e]+")
+CA_FILE_RE = re.compile(r"/[^\x00-\x1f\x7f]{0,4095}")
+
+
+@dataclass(frozen=True)
+class BaseUrl:
+    """A validated ``base_url``. ``host`` is lowercase (an IPv6 literal without brackets),
+    ``port_text`` the port as written (``None`` when absent), ``prefix`` the path prefix without a
+    trailing slash (``""`` or ``/a/b``)."""
+
+    scheme: str
+    host: str
+    port_text: str | None
+    prefix: str
+    ipv6: bool
+
+    @property
+    def port(self) -> int:
+        if self.port_text is not None:
+            return int(self.port_text)
+        return 443 if self.scheme == "https" else 80
+
+    @property
+    def authority(self) -> str:
+        """The Host header value: the host (bracketed for IPv6) and the port as written."""
+        host = f"[{self.host}]" if self.ipv6 else self.host
+        return host if self.port_text is None else f"{host}:{self.port_text}"
+
+    @property
+    def text(self) -> str:
+        return f"{self.scheme}://{self.authority}{self.prefix}"
+
+    @property
+    def probe_path(self) -> str:
+        return f"{self.prefix}/api/"
+
+    def request_path(self, service: str) -> str:
+        """The request path for a validated ``service``; never a double or trailing slash."""
+        if not service_ok(service):
+            raise ValueError("not a service name")
+        return f"{self.prefix}/api/services/notify/{service}"
+
+
+def parse_base_url(text: object) -> BaseUrl | None:
+    """The parts of a ``base_url``, or ``None`` when it does not match the grammar as a whole
+    (after one trailing ``/`` run), has a port outside 1 to 65535, a ``.`` or ``..`` segment or an
+    IPv6 literal that is not an address. The text between brackets must be a valid IPv6 address
+    (``ipaddress.IPv6Address``); the schema pattern is looser because it cannot express that. The
+    scheme is matched ASCII-only (``[Hh][Tt][Tt][Pp][Ss]?``) and is ``http`` or ``https`` after
+    lowercasing; whether ``http`` is allowed is judged in ``load``."""
+    if type(text) is not str or len(text) > BASE_URL_MAX_CHARS:
+        return None
+    match = _BASE_URL_RE.fullmatch(text)
+    if match is None:
+        return None
+    port = match.group("port")
+    if port is not None and not 1 <= int(port) <= 65535:
+        return None
+    prefix = match.group("prefix")
+    if any(seg in (".", "..") for seg in prefix.split("/")):
+        return None
+    host = match.group("host")
+    v6 = match.group("v6")
+    if v6 is not None:
+        try:
+            ipaddress.IPv6Address(v6)
+        except ValueError:
+            return None
+        host = v6
+    scheme = match.group("scheme").lower()
+    if scheme not in ("http", "https"):  # defence in depth: the pattern is ASCII-only
+        return None
+    return BaseUrl(scheme, host.lower(), port, prefix, v6 is not None)
+
+
+def service_ok(value: str) -> bool:
+    return SERVICE_RE.fullmatch(value) is not None
+
+
+def token_env_ok(value: str) -> bool:
+    return TOKEN_ENV_RE.fullmatch(value) is not None
+
+
+def ca_file_ok(value: str) -> bool:
+    return CA_FILE_RE.fullmatch(value) is not None
 
 
 # --- validation and merge --------------------------------------------------------------------
@@ -411,4 +610,12 @@ def load(gateway: Gateway, path: str | None = None) -> Config:
         full = os.path.join(dropins, name)
         if not _load_file(gateway, full, values):
             raise ConfigError(full)
+    # http needs allow_insecure_http, which any file may set: checked on the merged values.
+    parsed = parse_base_url(values["base_url"]) if "base_url" in values else None
+    if (
+        parsed is not None
+        and parsed.scheme == "http"
+        and values.get("allow_insecure_http") is not True
+    ):
+        raise ConfigError("base_url")
     return Config(values=values, home=home)
