@@ -78,7 +78,7 @@ def write(home: Path, text: str, name: str = "config.yaml") -> None:
 def yaml_list(items: list[str]) -> str:
     # Every character escaped, so control and odd code points reach the grammar check.
     return "link_hosts:\n" + "".join(
-        "  - \"" + "".join(f"\\U{ord(c):08x}" for c in item) + "\"\n" for item in items
+        '  - "' + "".join(f"\\U{ord(c):08x}" for c in item) + '"\n' for item in items
     )
 
 
@@ -132,7 +132,9 @@ def test_duplicates_are_accepted_and_kept(gw: FakeGateway, home: Path) -> None:
     assert load(gw).link_hosts == ("example.com", "example.com")
 
 
-@pytest.mark.parametrize("text", ["link_hosts: example.com\n", "link_hosts: 1\n", "link_hosts: ~\n"])
+@pytest.mark.parametrize(
+    "text", ["link_hosts: example.com\n", "link_hosts: 1\n", "link_hosts: ~\n"]
+)
 def test_a_non_list_is_config_invalid(gw: FakeGateway, home: Path, text: str) -> None:
     write(home, text)
     with pytest.raises(ConfigError) as info:

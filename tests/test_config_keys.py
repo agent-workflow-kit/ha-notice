@@ -591,7 +591,7 @@ def test_prefix_ok_equals_the_sanitizer_over_every_code_point() -> None:
 
 @pytest.mark.parametrize(
     "value",
-    ["", "a", "a" * 16, "a" * 17, " a", "a ", "a  b", "a\tb", "a\nb", "́", "á", "\ud800"]
+    ["", "a", "a" * 16, "a" * 17, " a", "a ", "a  b", "a\tb", "a\nb", "\u0301", "a\u0301", "\ud800"]
     + ["😀", "\U0001f600" * 16, "\U0001f600" * 17, "WARN:", "é" * 16],
 )
 def test_prefix_ok_golden_on_a_table(value: str) -> None:
