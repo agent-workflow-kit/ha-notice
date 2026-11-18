@@ -9,6 +9,7 @@ ha-notice is a small command line tool for scripts, cron jobs and hooks. It take
 - Sends a notification (`title`, `message`, `level`, `link`) to the `notify` service named in your config, with the access token read from the environment variable named by `token_env`.
 - Sanitizes text, adds a per-level title prefix (`WARN:`, `ACTION:`, `ERROR:` by default), cuts long titles and messages and builds the request from an allowlist only ([Rendering](docs/interface.md#rendering)).
 - Derives a notification tag from `--dedupe-key`, so a retry replaces the earlier notification instead of showing twice.
+- Removes a notification again with `clear --dedupe-key=<key>`, the tag-based command, which `send` can never send.
 - Is stateless: it keeps no database, only a log of what it sent or refused (never the text).
 - Works fully standalone: it calls no other tool and needs no other service than Home Assistant.
 
@@ -73,7 +74,7 @@ Without `--json` a successful send prints `sent (<level>, <duration_ms> ms)` on 
 
 ### Dry run
 
-`--dry-run` builds the request and prints it without sending anything. It needs neither `base_url`, `service` nor the token, reads no credential and writes no log record, so it is the safe way to see what a message becomes. It applies to `send` only.
+`--dry-run` builds the request and prints it without sending anything. It needs neither `base_url`, `service` nor the token, reads no credential and writes no log record, so it is the safe way to see what a message becomes. It applies to `send` and `clear`.
 
 ```console
 $ ha-notice --dry-run send --title Disk --message "Almost full" --level warn --dedupe-key=abc123
@@ -118,6 +119,15 @@ With `link_hosts` unset, a producer can aim the tap target at any web address. H
 ### Replacing a notification
 
 `--dedupe-key=<key>` sets a notification tag: `awkit-` plus 24 hex characters of the SHA-256 of the key. Home Assistant replaces an earlier notification that has the same tag, whatever its level, so a retry does not show twice. Pass a hex digest of your key rather than a raw id, in the `=` form. A late first request can replace a newer notification with the same tag; a router that cares puts the level or a sequence number in its key.
+
+### Clearing a notification
+
+`ha-notice clear --dedupe-key=<key>` asks the phone to remove the notification that was sent with the same key (the tag is derived the same way). It sends the companion-app command `clear_notification` with that tag and nothing else, and takes no title, message or input: `--dedupe-key` is required and the only flag of its own. `send` never sends this command: a message that is `clear_notification` is still refused with `command_keyword`. Everything else follows `send`: the config, `enabled: false` (exit 22), `--dry-run` (prints the body, needs no destination or token), the deadline and retries, the exit codes, the error envelope and the log. Output says `sent`: Home Assistant accepted the request, and whether the phone removed the notification is not observable.
+
+```console
+$ ha-notice --dry-run clear --dedupe-key=abc123
+{"message":"clear_notification","data":{"tag":"awkit-6ca13d52ca70c883e0f0bb10"}}
+```
 
 ### Truncation limits
 

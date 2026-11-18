@@ -68,6 +68,7 @@ Every test prints a header with its name, the checklist item it settles and a ru
 | `test_default_ca_paths` | V18 | Nothing; prints the default CA paths and whether each exists and loads, then asserts the system-trust probe: for an https instance with `LIVE_HA_CA_FILE` (self-signed) a pass means system trust rejects the chain, without it a pass means system trust verifies the chain; a failure means this machine's default trust does not match the instance. An http instance skips after printing the paths. |
 | `test_path_prefix` | path-prefix | One notification sent through the prefix. |
 | `test_other_notify_service` | other-services | Whether the other service accepted and showed the body (record-only: it asserts only that the tool answered with exit 0 or 12). |
+| `test_clear_removes_the_notification` | V21 | One tagged notification, then (after `LIVE_HA_PAUSE` seconds, so you can see it) the tool's `clear` with the same key: the notification disappears from the shade and nothing new appears. It sends the command through the tool only; the guarded raw helpers still refuse the word. |
 | `test_command_word_families` | V10 | Opt-in, `-m live_commands` only. One notification per command word; does the phone act or show text. |
 
 ## Record the results
