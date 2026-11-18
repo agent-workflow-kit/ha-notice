@@ -251,8 +251,9 @@ def validate_notification(obj: object, link_hosts: Sequence[str] | None = None) 
 
     Checked in a fixed order, so that the refusal does not depend on the order of the keys: a
     value that is not an object (pointer ``""``), then unknown fields (the smallest name), then the
-    known fields in the order title, message, level, link, actions (wrong type, over 100000 characters, a
-    lone surrogate, level outside the vocabulary), and last a message that is absent or empty after
+    known fields in the order title, message, level, link, actions (wrong type, over 100000
+    characters, a lone surrogate, level outside the vocabulary, an action that breaks its rules),
+    and last a message that is absent or empty after
     sanitizing (``empty_message``) or a command message (``command_keyword``).
     ``null`` is a wrong type, never an absent field.
 

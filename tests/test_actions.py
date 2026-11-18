@@ -81,7 +81,9 @@ def test_the_count_is_checked_before_any_item() -> None:
     assert_refused(note(["x"] * 4), "invalid_payload", "/actions")
 
 
-@pytest.mark.parametrize("value", [None, "x", 1, True, {}, {"title": "a", "uri": "https://a.example"}])
+@pytest.mark.parametrize(
+    "value", [None, "x", 1, True, {}, {"title": "a", "uri": "https://a.example"}]
+)
 def test_actions_must_be_a_list(value: object) -> None:
     assert_refused(note(value), "invalid_payload", "/actions")
 
@@ -244,12 +246,12 @@ def test_check_order_link_then_actions_then_empty_message() -> None:
         {"actions": [act(uri="app://x")], "link": "ftp://a.example"}, "link_scheme", None
     )
     assert_refused({"actions": [act(uri="app://x")]}, "link_scheme", "/actions/0/uri")
-    assert_refused({"message": "  ", "actions": [act(uri="app://x")]}, "link_scheme", "/actions/0/uri")
+    assert_refused(
+        {"message": "  ", "actions": [act(uri="app://x")]}, "link_scheme", "/actions/0/uri"
+    )
     assert_refused({"message": "  ", "actions": [act()]}, "empty_message", None)
     # Items are judged in order and the first refusal wins.
-    assert_refused(
-        note([act(title=""), act(uri="app://x")]), "invalid_payload", "/actions/0/title"
-    )
+    assert_refused(note([act(title=""), act(uri="app://x")]), "invalid_payload", "/actions/0/title")
 
 
 def test_no_input_is_echoed_in_errors() -> None:
@@ -263,7 +265,7 @@ def test_no_input_is_echoed_in_errors() -> None:
     ):
         err = refusal(obj)
         assert secret not in json.dumps(err.to_error().envelope)
-        
+
 
 # --- rendering -----------------------------------------------------------------------------
 
@@ -344,7 +346,11 @@ def test_golden_request_body(golden: Golden) -> None:
         }
     )
     out = render(
-        n, max_chars=1000, default_group="ops", level_prefix=PREFIX, tag="awkit-6ab9f1eb8f7d3388f4f9d586"
+        n,
+        max_chars=1000,
+        default_group="ops",
+        level_prefix=PREFIX,
+        tag="awkit-6ab9f1eb8f7d3388f4f9d586",
     )
     golden.check("request", "actions.json", serialize(out.body).decode("utf-8"))
 

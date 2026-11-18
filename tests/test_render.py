@@ -360,8 +360,11 @@ def test_data_allowlist_fuzz() -> None:
             obj["link"] = rng.choice(["HTTPS://a.example/x", "http://b.example:80/?q=1#f"])
         if rng.random() < 0.5:
             obj["actions"] = [
-                {"title": "".join(rng.choice(alphabet) for _ in range(rng.randrange(1, 10))) + "t",
-                 "uri": rng.choice(["HTTPS://a.example/x", "http://b.example:80/?q=1#f"])}
+                {
+                    "title": "".join(rng.choice(alphabet) for _ in range(rng.randrange(1, 10)))
+                    + "t",
+                    "uri": rng.choice(["HTTPS://a.example/x", "http://b.example:80/?q=1#f"]),
+                }
                 for _ in range(rng.randrange(0, 4))
             ]
         n = validate_notification(obj)
