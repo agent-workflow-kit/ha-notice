@@ -197,6 +197,7 @@ def _error_facts(inv: Invocation, plan: Plan, result: _Result, error: ErrorResul
 def _present(inv: Invocation, config: Config, plan: Plan, result: _Result) -> int:
     """Print the result (stdout is written and flushed first), then run the log step."""
     error = result.error
+    _verbose(inv, "send", result.send_started, result.fixed_at)
     if error is None:
         duration_ms = _ms(plan.started, result.fixed_at)
         warnings = [INSECURE_HTTP] if _is_http(config) else []
@@ -232,7 +233,6 @@ def _present(inv: Invocation, config: Config, plan: Plan, result: _Result) -> in
         emit_error(inv.json, error)
         code = error.exit_code
         facts = _error_facts(inv, plan, result, error)
-    _verbose(inv, "send", result.send_started, result.fixed_at)
     _log(inv, config, facts)
     flush_streams()
     return code
