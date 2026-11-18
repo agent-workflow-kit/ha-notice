@@ -1,4 +1,5 @@
-"""pytest wiring: golden-file harness (tests/harness.py) and certificate fixtures (#4)."""
+"""Shared fixtures: a self-signed certificate made once per session (issue #4) and the
+golden-file harness wiring (tests/harness.py)."""
 
 from __future__ import annotations
 
