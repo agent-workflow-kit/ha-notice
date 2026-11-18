@@ -11,13 +11,6 @@ A refusal is a ``PayloadError``; ``PayloadError.to_error`` builds the exit 20 en
 ``output.build_error``. No refusal carries an input value: the pointer is ``/<field>`` for a plain
 field name and ``/?`` otherwise (``output.safe_pointer``), and the reason is a fixed word.
 
-<<<<<<< /tmp/claude-1000/ours
-TODO(#12): input reading limits and the hardened JSON parse (``details.pointer`` ``""`` for a
-parse failure); it hands the parsed value to ``validate_notification``.
-The sanitizer (issue #13, docs/interface.md, Sanitizer) runs inside ``validate_notification``, so
-``Notification.title`` and ``Notification.message`` hold the sanitized text. TODO(#17): the title
-and message cut, the prefix and the budget (rendering).
-=======
 Input reading (issue #12): ``read_notification`` reads the source through the gateway (at most
 ``INPUT_MAX`` bytes, in slices, against the deadline), decodes it as strict UTF-8 and parses it with
 ``hardened_loads``; ``parse_notification`` hands the parsed value to ``validate_notification``.
@@ -26,23 +19,19 @@ Every parse failure is ``invalid_payload`` with pointer ``""``. A stalled produc
 gateway's ``SourceError`` (exit 2 ``usage``), which the caller maps.
 TODO(#26): signals during input (exit 128+N); the caller's ``remaining`` returns 0 on a signal,
 which today reads as a timeout.
-TODO(#13): the sanitizer (also the lone surrogate rule and the whitespace-only message, which is
-``empty_message`` after sanitizing) and the title cut.
->>>>>>> /tmp/claude-1000/theirs
+The sanitizer (issue #13, docs/interface.md, Sanitizer) runs inside ``validate_notification``, so
+``Notification.title`` and ``Notification.message`` hold the sanitized text. TODO(#17): the title
+and message cut, the prefix and the budget (rendering).
 TODO(#14): the command-keyword check. TODO(#15): the link rule. TODO(#16): ``link_hosts``.
 """
 
 from __future__ import annotations
 
-<<<<<<< /tmp/claude-1000/ours
-import re
-import unicodedata
-from collections.abc import Mapping
-=======
 import json
 import math
+import re
+import unicodedata
 from collections.abc import Callable, Mapping
->>>>>>> /tmp/claude-1000/theirs
 from dataclasses import dataclass
 from typing import Any
 
