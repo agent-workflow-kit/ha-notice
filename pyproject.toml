@@ -43,6 +43,8 @@ pythonVersion = "3.12"
 testpaths = ["tests"]
 markers = [
   "live: needs real models/hosts/credentials; never run in CI",
+  "settles(*items): the live-verification checklist item(s) a live test settles (tests/live)",
+  "live_commands: sends companion-app command words to a phone; also needs LIVE_HA_ALLOW_COMMANDS=1",
   "long_alarm: raise the per-test SIGALRM guard from 20 s to 60 s",
 ]
 addopts = "-m 'not live'"
