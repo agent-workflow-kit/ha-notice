@@ -16,9 +16,14 @@ Rules kept here (docs/interface.md, Config):
   ``ConfigError`` whose key is the file path; the YAML error text, which quotes the file, is
   never kept, not even as ``__cause__``.
 - An unknown key is refused before its value is examined, by ``output.safe_key``.
-- Only the type of each known key is checked here. TODO(#9): the grammar and range of the
-  durations, ``level_prefix``, ``default_group`` and ``max_chars``; TODO(#10): ``base_url``,
-  ``token_env`` and ``ca_file``; TODO(#16): ``link_hosts``.
+- The type of each known key is checked first, then its grammar and range (issue #9):
+  durations (``(0|[1-9][0-9]*)(\\.[0-9]+)?(ms|s|m)?`` of at most 64 characters, or a finite number
+  of seconds, compared exactly in ``Fraction``s, so ``1e3``, ``1:30``, ``.nan`` and a bool are
+  refused), ``level_prefix`` members (at most 16 characters that the sanitizer's title rule leaves
+  unchanged), ``default_group`` and
+  ``max_chars``. Every pattern is a full match (``re.fullmatch``, never ``$``). The error names the
+  key and never the value. TODO(#10): ``base_url``, ``token_env`` and ``ca_file`` grammars;
+  TODO(#16): ``link_hosts``.
 - The token is never read here.
 """
 
@@ -27,8 +32,10 @@ from __future__ import annotations
 import math
 import os.path
 import re
+import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import Any
 
 import yaml
@@ -36,7 +43,7 @@ import yaml
 from ha_notice.gateway import Gateway, HomeLookupError, SourceError
 from ha_notice.output import ErrorResult, build_error, safe_key
 
-__all__ = ["KNOWN_KEYS", "MAX_FILE_BYTES", "Config", "ConfigError", "load"]
+__all__ = ["DEFAULTS", "KNOWN_KEYS", "MAX_FILE_BYTES", "Config", "ConfigError", "load"]
 
 MAX_FILE_BYTES = 65536
 KNOWN_KEYS = (
@@ -59,6 +66,25 @@ _STR_KEYS = frozenset({"base_url", "service", "token_env", "ca_file", "default_g
 _DURATION_KEYS = frozenset({"timeout", "connect_timeout"})
 _LEVELS = frozenset({"info", "warn", "action", "error"})
 
+# The defaults of the keys that have one (the required base_url and service, and the unset ca_file,
+# link_hosts and default_group, have none). Equal to config.example.yaml and schemas/config.json.
+DEFAULTS: dict[str, Any] = {
+    "enabled": True,
+    "token_env": "HA_TOKEN",
+    "allow_insecure_http": False,
+    "level_prefix": {"info": "", "warn": "WARN:", "action": "ACTION:", "error": "ERROR:"},
+    "max_chars": 1000,
+    "timeout": "10s",
+    "connect_timeout": "3s",
+    "log": True,
+}
+_RANGES: dict[str, tuple[Fraction, Fraction]] = {  # seconds, inclusive
+    "timeout": (Fraction(1), Fraction(120)),
+    "connect_timeout": (Fraction(1), Fraction(30)),
+}
+MAX_CHARS_RANGE = (100, 2000)
+PREFIX_MAX = 16
+
 
 class ConfigError(Exception):
     """The config cannot be used. ``key`` is the ``details.key`` of the ``config_invalid`` error
@@ -78,6 +104,39 @@ class Config:
 
     values: dict[str, Any] = field(default_factory=dict)
     home: str = ""
+
+    # Accessors apply the defaults. ``load`` has validated every value, so none of them can fail.
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.values.get("enabled", DEFAULTS["enabled"]))
+
+    @property
+    def log(self) -> bool:
+        return bool(self.values.get("log", DEFAULTS["log"]))
+
+    @property
+    def timeout(self) -> float:
+        """The deadline of a send, in seconds."""
+        return _seconds_float(self.values.get("timeout", DEFAULTS["timeout"]))
+
+    @property
+    def connect_timeout(self) -> float:
+        """The limit of the connect phase, in seconds (not yet capped by the time left)."""
+        return _seconds_float(self.values.get("connect_timeout", DEFAULTS["connect_timeout"]))
+
+    @property
+    def max_chars(self) -> int:
+        return int(self.values.get("max_chars", DEFAULTS["max_chars"]))
+
+    @property
+    def default_group(self) -> str | None:
+        return self.values.get("default_group")
+
+    @property
+    def level_prefix(self) -> dict[str, str]:
+        """The prefix of each of the four levels (a copy)."""
+        return {**DEFAULTS["level_prefix"], **self.values.get("level_prefix", {})}
 
 
 # --- the strict loader -----------------------------------------------------------------------
@@ -169,6 +228,89 @@ def _parse(raw: bytes) -> object:
         return _FAILED
 
 
+# --- grammar and range of the known keys (issue #9) ------------------------------------------
+
+# No leading zero, so a quoted ``"010"`` is refused like the bare ``010`` (which the loader leaves a
+# string). A string longer than DURATION_MAX_CHARS is refused, whatever the interpreter's limit.
+DURATION_MAX_CHARS = 64
+DURATION_RE = re.compile(r"((?:0|[1-9][0-9]*)(?:\.[0-9]+)?)(ms|s|m)?")
+GROUP_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_UNIT = {None: Fraction(1), "s": Fraction(1), "ms": Fraction(1, 1000), "m": Fraction(60)}
+# Sanitizer table (docs/interface.md): the listed Cf and default-ignorable characters it removes.
+_REMOVED = frozenset(
+    [0x00AD, 0x061C, 0x180E, 0x200B, 0x200E, 0x200F, 0xFEFF, 0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800]
+    + list(range(0x202A, 0x202F))
+    + list(range(0x2060, 0x2070))
+    + list(range(0xFFF9, 0xFFFC))
+    + list(range(0xE0000, 0xE0080))
+    + list(range(0xE0100, 0xE01F0))
+    + list(range(0x180B, 0x180E))
+    + [0x180F]
+)
+_REMOVED_CATEGORIES = frozenset({"Cc", "Cs", "Co", "Cn", "Zl", "Zp"})
+_EMPTY_CATEGORIES = frozenset({"Mn", "Mc", "Me"})
+
+
+def _seconds(value: object) -> Fraction | None:
+    """The exact number of seconds of a duration value, or ``None`` when it is not one. A bool is
+    never a number, and a string is read only by the grammar (never ``float()``)."""
+    if type(value) is int:
+        return Fraction(value)
+    if type(value) is float:
+        return Fraction(value) if math.isfinite(value) else None
+    if type(value) is str:
+        match = DURATION_RE.fullmatch(value) if len(value) <= DURATION_MAX_CHARS else None
+        if match is None:
+            return None
+        return Fraction(match.group(1)) * _UNIT[match.group(2)]
+    return None
+
+
+def _seconds_float(value: object) -> float:
+    seconds = _seconds(value)
+    if seconds is None:  # load() validated the value, so this is a programming error
+        raise ValueError("not a duration")
+    return float(seconds)
+
+
+def duration_ok(key: str, value: object) -> bool:
+    seconds = _seconds(value)
+    lo, hi = _RANGES[key]
+    return seconds is not None and lo <= seconds <= hi
+
+
+def group_ok(value: str) -> bool:
+    return GROUP_RE.fullmatch(value) is not None
+
+
+def prefix_ok(value: str) -> bool:
+    """A ``level_prefix`` member: at most 16 code points that the title rule (sanitizer steps 1 to
+    5) leaves unchanged, and that are not an empty title. The sanitizer itself is #13's; this is
+    its title rule restated for a prefix. TODO(#13): call the sanitizer instead, once it exists."""
+    if len(value) > PREFIX_MAX:
+        return False
+    for ch in value:
+        if ord(ch) in _REMOVED or unicodedata.category(ch) in _REMOVED_CATEGORIES:
+            return False
+    if value != value.strip() or "  " in value:
+        return False
+    return not value or any(
+        not ch.isspace() and unicodedata.category(ch) not in _EMPTY_CATEGORIES for ch in value
+    )
+
+
+def _grammar_ok(key: str, value: Any) -> bool:
+    if key in _DURATION_KEYS:
+        return duration_ok(key, value)
+    if key == "max_chars":
+        return MAX_CHARS_RANGE[0] <= value <= MAX_CHARS_RANGE[1]
+    if key == "default_group":
+        return group_ok(value)
+    if key == "level_prefix":
+        return all(prefix_ok(v) for v in value.values())
+    return True  # TODO(#10): base_url, token_env, ca_file; TODO(#16): link_hosts
+
+
 # --- validation and merge --------------------------------------------------------------------
 
 
@@ -203,6 +345,8 @@ def _check_document(doc: object) -> str | None:
         if not _type_ok(name, value):
             return name
         if name == "level_prefix" and not set(value) <= _LEVELS:
+            return name
+        if not _grammar_ok(name, value):
             return name
     return None
 
