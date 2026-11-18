@@ -483,13 +483,13 @@ class RealGateway:
     def read_config(self, path: str, max_bytes: int) -> bytes | None:
         """Read a config file of at most ``max_bytes``; ``None`` when it does not exist.
 
-        The path is opened ``O_NONBLOCK`` (a FIFO never blocks) and the opened descriptor must be
-        a regular file; symlinks are followed. A file that is not regular, cannot be read or is
-        larger than ``max_bytes`` is ``SourceError``. Only a missing file (also a dangling
-        symlink) is ``None``.
+        The path is opened ``O_NONBLOCK`` (a FIFO never blocks) and ``O_NOCTTY``, and the opened
+        descriptor must be a regular file; symlinks are followed. A file that is not regular,
+        cannot be read or is larger than ``max_bytes`` is ``SourceError``. Only a missing file
+        (also a dangling symlink) is ``None``.
         """
         try:
-            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
         except FileNotFoundError:
             return None
         except (OSError, ValueError):

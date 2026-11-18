@@ -245,6 +245,22 @@ def test_too_many_drop_ins_is_config_invalid(gw: FakeGateway, home: Path) -> Non
     assert fails(gw).key == str(d)
 
 
+def test_256_drop_ins_load(gw: FakeGateway, home: Path) -> None:
+    d = cfg_dir(home) / "config.d"
+    d.mkdir()
+    for i in range(256):
+        (d / f"{i:04}.yaml").write_text("log: true\n")
+    assert config.load(gw, None).values == {"log": True}
+
+
+def test_257_drop_ins_is_config_invalid_naming_config_d(gw: FakeGateway, home: Path) -> None:
+    d = cfg_dir(home) / "config.d"
+    d.mkdir()
+    for i in range(257):
+        (d / f"{i:04}.yaml").write_text("log: true\n")
+    assert fails(gw).key == str(d)
+
+
 def test_the_error_names_the_file_that_failed(gw: FakeGateway, home: Path) -> None:
     write_main(home, "log: true\n")
     bad = write_dropin(home, "20.yaml", "log: [\n")
@@ -415,7 +431,13 @@ def test_strict_loader_table_is_config_invalid(gw: FakeGateway, home: Path, text
         ("level_prefix:\n  info: ''\n", {"level_prefix": {"info": ""}}),
         ("# comment\nlog: false # trailing\n", {"log": False}),
         ("﻿log: false\n", {"log": False}),
-        ("service: &a x\n", {"service": "x"}),  # an anchor without an alias is harmless
+        ("service: trueish\n", {"service": "trueish"}),
+        ("service: falsey\n", {"service": "falsey"}),
+        ("service: nullable\n", {"service": "nullable"}),
+        ("service: ~x\n", {"service": "~x"}),
+        ("service: 1.5.2\n", {"service": "1.5.2"}),
+        ("timeout: 1.5.2\n", {"timeout": "1.5.2"}),
+        ("timeout: trueish\n", {"timeout": "trueish"}),
         ('service: "café"\n', {"service": "café"}),
     ],
 )
@@ -512,6 +534,30 @@ def test_tags_do_not_run_code(gw: FakeGateway, home: Path, tmp_path: Path) -> No
     )
     fails(gw)
     assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a: &x 1\n",
+        "&a {timeout: 5}\n",
+        'timeout: !!int "5"\n',
+        "enabled: !!bool true\n",
+        "service: !!str x\n",
+        'timeout: !!float "1.5"\n',
+        "level_prefix: !!map {info: x}\n",
+        "!!map {timeout: 5}\n",
+        "service: &a x\n",
+    ],
+)
+def test_anchors_and_explicit_tags_are_config_invalid(
+    gw: FakeGateway, home: Path, text: str
+) -> None:
+    path = write_main(home, text)
+    err = fails(gw)
+    assert err.key == str(path)
+    assert err.__cause__ is None
+    assert err.__context__ is None
 
 
 def test_anchors_with_aliases_are_refused(gw: FakeGateway, home: Path) -> None:
@@ -822,3 +868,19 @@ def test_real_list_config_dir(tmp_path: Path) -> None:
     assert real.list_config_dir(str(tmp_path)) == ["a.yaml", "b.yaml"]
     with pytest.raises(SourceError):
         real.list_config_dir(str(tmp_path / "a.yaml"))
+
+
+def test_real_read_config_opens_with_o_noctty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "f").write_bytes(b"abc")
+    seen: list[int] = []
+    real_open = os.open
+
+    def spy(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        seen.append(flags)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", spy)
+    assert RealGateway().read_config(str(tmp_path / "f"), 100) == b"abc"
+    assert seen and all(f & os.O_NOCTTY for f in seen)

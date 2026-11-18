@@ -9,8 +9,8 @@ Rules kept here (docs/interface.md, Config):
 - The loader is ``SafeLoader``'s machinery with its own resolvers and constructors: the only
   booleans are ``true`` and ``false``, the only numbers are decimal integers and decimal floats
   (``1.5``), so ``no``, ``010``, ``1:30``, ``0x10``, ``1_0``, ``1e3``, ``.inf`` and ``.nan``
-  stay strings. Duplicate keys, explicit tags and aliases are refused (an alias bomb is refused
-  at the first alias, so it cannot expand). Text is decoded as UTF-8 here, so no encoding is
+  stay strings. Duplicate keys, anchors, explicit tags and aliases are refused (an alias bomb is
+  refused at the first alias, so it cannot expand). Text is decoded as UTF-8 here, so no encoding is
   sniffed.
 - Any failure to read or parse a file (also ``RecursionError`` and ``MemoryError``) is
   ``ConfigError`` whose key is the file path; the YAML error text, which quotes the file, is
@@ -141,6 +141,11 @@ class _StrictLoader(yaml.SafeLoader):
     def compose_node(self, parent: Any, index: Any) -> Any:
         if self.check_event(yaml.AliasEvent):
             raise ValueError("aliases are not allowed")
+        event = self.peek_event()
+        if getattr(event, "anchor", None) is not None:
+            raise ValueError("anchors are not allowed")
+        if getattr(event, "tag", None) is not None:
+            raise ValueError("explicit tags are not allowed")
         return super().compose_node(parent, index)
 
 
