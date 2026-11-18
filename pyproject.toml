@@ -1,6 +1,6 @@
 [project]
 name = "ha-notice"
-version = "0.23.0"
+version = "0.24.0"
 description = "Send a notification through the Home Assistant REST notify service"
 readme = "README.md"
 requires-python = ">=3.12"
