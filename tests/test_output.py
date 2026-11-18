@@ -743,7 +743,7 @@ def _proc(tmp_path: Path, args: list[str], **streams: Any) -> subprocess.Complet
 
 
 def test_real_process_exit_1_envelope_is_ascii_safe_under_the_c_locale(tmp_path: Path) -> None:
-    # The send stub exits 1 until #27; this checks the whole exit-1 path of a real process.
+    # The validate stub exits 1 until #28; this checks the whole exit-1 path of a real process.
     proc = _proc(tmp_path, ["--json", "validate"])
     assert proc.returncode == 1
     assert schema_errors("cli/error", json.loads(proc.stdout)) == []

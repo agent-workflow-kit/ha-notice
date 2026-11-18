@@ -157,6 +157,22 @@ def test_a_pipe_closed_early_leaves_the_exit_code_unchanged(tmp_path: Path, home
             assert b"Traceback" not in done.stderr and b"BrokenPipe" not in done.stderr
 
 
+def test_a_full_disk_on_stdout_leaves_the_exit_code_unchanged(tmp_path: Path, home: Path) -> None:
+    with FakeHA(script=[Reply()]) as ha, open("/dev/full", "wb") as full:
+        cfg = write_config(tmp_path, ha)
+        done = subprocess.run(
+            command("--config", cfg, "--json", "send", "--message=hi"),
+            env=make_env(home),
+            stdin=subprocess.DEVNULL,
+            stdout=full,
+            stderr=full,
+            timeout=LIMIT_S,
+            check=False,
+        )
+        assert done.returncode == 0 and len(ha.requests) == 1
+        assert [r["outcome"] for r in log_records(home)] == ["sent"]
+
+
 def test_a_c_locale_with_a_non_ascii_key_and_message(tmp_path: Path, home: Path) -> None:
     key = "clé-é"
     with FakeHA() as ha:
@@ -188,6 +204,9 @@ def held() -> Iterator[list[subprocess.Popen[bytes]]]:
         except subprocess.TimeoutExpired:
             proc.terminate()
             proc.wait(10)
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe is not None:
+                pipe.close()
 
 
 def test_sigterm_during_the_send_reports_by_the_gate_and_logs(
