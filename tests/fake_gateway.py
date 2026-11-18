@@ -1,0 +1,271 @@
+"""A scripted gateway for process tests (issue #3).
+
+``FakeGateway`` has the same methods, signatures and exceptions as ``ha_notice.gateway``'s real
+gateway (``tests/test_gateway_conformance.py`` pins that). It scripts the clock, name resolution,
+the home directory and uid, input sources, CA path candidates and each connection. State
+directory and TLS context methods delegate to the real implementation, so a test points them at
+a private temporary home.
+
+Nothing here opens a network connection. Blocking steps wait on ``threading.Event`` objects
+that the test sets, with a hard cap so a broken test fails instead of hanging.
+"""
+
+from __future__ import annotations
+
+import http.client
+import threading
+from collections import deque
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import NoReturn
+
+from ha_notice import gateway as gw
+from ha_notice.gateway import (
+    AddrInfo,
+    CaCandidates,
+    ConnectSpec,
+    HomeLookupError,
+    SourceError,
+    SourceResult,
+    StateDirError,
+)
+
+WAIT_CAP_SECONDS = 10.0
+LOOPBACK: AddrInfo = (2, 1, 6, "", ("127.0.0.1", 0))
+
+
+class FakeExit(BaseException):
+    """Raised by ``FakeGateway.exit_process`` instead of ending the test process."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass
+class StallingSource:
+    """Input that delivers ``data`` and then never ends (a producer that stalls)."""
+
+    data: bytes = b""
+
+
+@dataclass
+class ConnectionScript:
+    """What one fake connection does. Every field is optional; the default is a 200 ``[]``."""
+
+    resolve: bool = True  # call the gateway's resolver in connect(), as the real one does
+    connect_delay: float = 0.0  # seconds the fake clock advances inside connect()
+    connect_block: threading.Event | None = None  # connect() waits for this event
+    connect_error: BaseException | None = None
+    request_error: BaseException | None = None  # raised by request() after the partial write
+    request_bytes_before_error: int = 0
+    status: int = 200
+    body: bytes = b"[]"
+    response_error: BaseException | None = None  # raised by getresponse()
+    stall_after_first_byte: threading.Event | None = None  # read() waits after byte one
+
+
+@dataclass
+class RecordedRequest:
+    method: str
+    path: str
+    body: bytes | None
+    headers: dict[str, str]
+
+
+class FakeResponse:
+    def __init__(self, script: ConnectionScript) -> None:
+        self.status = script.status
+        self._body = script.body
+        self._pos = 0
+        self._stall = script.stall_after_first_byte
+
+    def read(self, amt: int) -> bytes:
+        if amt < 0:
+            raise ValueError("amt must not be negative")
+        if self._stall is not None and self._pos >= 1:
+            self._stall.wait(WAIT_CAP_SECONDS)
+        if self._stall is not None and self._pos == 0:
+            amt = min(amt, 1)
+        chunk = self._body[self._pos : self._pos + amt]
+        self._pos += len(chunk)
+        return chunk
+
+
+class FakeConnection:
+    def __init__(self, gateway: FakeGateway, spec: ConnectSpec, script: ConnectionScript) -> None:
+        self._gateway = gateway
+        self.spec = spec
+        self.script = script
+        self.connected = False
+        self.closed = False
+        self.requests: list[RecordedRequest] = []
+        self.bytes_written = 0
+        self._request_done = False
+
+    def connect(self) -> None:
+        if self.script.resolve:
+            self._gateway.resolve(self.spec.host, self.spec.port)
+        if self.script.connect_block is not None:
+            self.script.connect_block.wait(WAIT_CAP_SECONDS)
+        self._gateway.advance(self.script.connect_delay)
+        if self.script.connect_error is not None:
+            raise self.script.connect_error
+        self.connected = True
+
+    def request(
+        self, method: str, path: str, body: bytes | None, headers: Mapping[str, str]
+    ) -> None:
+        if not self.connected:
+            self.connect()
+        if self.script.request_error is not None:
+            self.bytes_written += self.script.request_bytes_before_error
+            raise self.script.request_error
+        self.bytes_written += len(body or b"") + len(path) + len(method)
+        self.requests.append(RecordedRequest(method, path, body, dict(headers)))
+        self._request_done = True
+
+    def getresponse(self) -> FakeResponse:
+        if not self._request_done:
+            raise http.client.ResponseNotReady("no request was sent")
+        if self.script.response_error is not None:
+            raise self.script.response_error
+        return FakeResponse(self.script)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@dataclass
+class FakeGateway:
+    """Implements ``ha_notice.gateway.Gateway`` with scripted behaviour."""
+
+    now: float = 1000.0
+    wall: float = 1_700_000_000.0
+    hosts: dict[str, list[AddrInfo]] = field(default_factory=dict)
+    resolve_errors: dict[str, BaseException] = field(default_factory=dict)
+    resolve_block: threading.Event | None = None
+    home: str | HomeLookupError = "/nonexistent-fake-home"
+    user_id: int = 1000
+    login: str | None = "fakeuser"
+    tty_fds: set[int] = field(default_factory=set)
+    sources: dict[int | str, bytes | StallingSource | SourceError] = field(default_factory=dict)
+    state_error: StateDirError | None = None
+    ca: CaCandidates = field(default_factory=lambda: CaCandidates("", "", ()))
+    scripts: deque[ConnectionScript] = field(default_factory=deque)
+    default_script: ConnectionScript = field(default_factory=ConnectionScript)
+    # Records, for assertions.
+    sleeps: list[float] = field(default_factory=list)
+    resolve_calls: list[tuple[str, int]] = field(default_factory=list)
+    connections: list[FakeConnection] = field(default_factory=list)
+    exits: list[int] = field(default_factory=list)
+    _real: gw.RealGateway = field(default_factory=gw.RealGateway)
+
+    # Clock
+    def monotonic(self) -> float:
+        return self.now
+
+    def wall_time(self) -> float:
+        return self.wall + (self.now - 1000.0)
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.advance(seconds)
+
+    def advance(self, seconds: float) -> None:
+        if seconds > 0:
+            self.now += seconds
+
+    # Names
+    def resolve(self, host: str, port: int) -> list[AddrInfo]:
+        self.resolve_calls.append((host, port))
+        if self.resolve_block is not None:
+            self.resolve_block.wait(WAIT_CAP_SECONDS)
+        if host in self.resolve_errors:
+            raise self.resolve_errors[host]
+        if host in self.hosts:
+            return list(self.hosts[host])
+        return [LOOPBACK]
+
+    # Identity
+    def home_dir(self) -> str:
+        if isinstance(self.home, HomeLookupError):
+            raise self.home
+        return self.home
+
+    def uid(self) -> int:
+        return self.user_id
+
+    def login_name(self) -> str | None:
+        return self.login
+
+    # Input
+    def isatty(self, fd: int) -> bool:
+        return fd in self.tty_fds
+
+    def read_source(
+        self, source: int | str, max_bytes: int, remaining: Callable[[], float]
+    ) -> SourceResult:
+        scripted = self.sources.get(source, b"")
+        if isinstance(scripted, SourceError):
+            raise scripted
+        if isinstance(scripted, StallingSource):
+            if len(scripted.data) > max_bytes:
+                return SourceResult(scripted.data[:max_bytes], "too_large")
+            left = remaining()
+            while left > 0:
+                self.advance(min(gw.SLICE_SECONDS, left))
+                left = remaining()
+            return SourceResult(scripted.data, "timeout")
+        if remaining() <= 0:
+            return SourceResult(b"", "timeout")
+        if len(scripted) > max_bytes:
+            return SourceResult(scripted[:max_bytes], "too_large")
+        return SourceResult(scripted, "ok")
+
+    # State directory (delegates to the real code, on whatever home the test passes)
+    def open_state_dir(self, home: str) -> int:
+        if self.state_error is not None:
+            raise self.state_error
+        return self._real.open_state_dir(home)
+
+    def open_state_file(self, dir_fd: int, name: str, *, append: bool = False) -> int:
+        return self._real.open_state_file(dir_fd, name, append=append)
+
+    def try_lock(self, fd: int) -> bool:
+        return self._real.try_lock(fd)
+
+    def rename_state_file(self, dir_fd: int, src: str, dst: str) -> None:
+        self._real.rename_state_file(dir_fd, src, dst)
+
+    def write_fd(self, fd: int, data: bytes) -> int:
+        return self._real.write_fd(fd, data)
+
+    def close_fd(self, fd: int) -> None:
+        self._real.close_fd(fd)
+
+    # TLS and HTTP
+    def ca_candidates(self) -> CaCandidates:
+        return self.ca
+
+    def new_tls_context(self, ca_files: Sequence[str]) -> gw.ssl.SSLContext:
+        return gw.build_tls_context(ca_files)
+
+    def connect(self, spec: ConnectSpec) -> FakeConnection:
+        script = self.scripts.popleft() if self.scripts else self.default_script
+        conn = FakeConnection(self, spec, script)
+        self.connections.append(conn)
+        return conn
+
+    # Process
+    def exit_process(self, code: int) -> NoReturn:
+        self.exits.append(code)
+        raise FakeExit(code)
+
+
+def private_home(tmp_path: Path) -> str:
+    """A home directory for state-directory tests, created with a private mode."""
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    return str(home)
