@@ -294,7 +294,7 @@ def test_connect_blocked_past_the_deadline_reports_network_error_and_writes_noth
     done = threading.Event()
 
     def attempt(before_write: Callable[[], None]) -> RawResponse:
-        release.wait(10)  # name resolution or connect that outlasts the deadline
+        release.wait(30)  # name resolution or connect that outlasts the deadline
         try:
             before_write()
         except GateRefused:
@@ -321,7 +321,7 @@ def test_connect_blocked_past_the_deadline_reports_network_error_and_writes_noth
 def test_a_block_after_the_first_byte_reports_outcome_unknown(release: threading.Event) -> None:
     def attempt(before_write: Callable[[], None]) -> RawResponse:
         before_write()
-        release.wait(10)
+        release.wait(30)
         return resp()
 
     verdict, took = run(ClockGateway(), attempt)
@@ -338,7 +338,7 @@ def test_a_late_response_after_a_writing_deadline_does_not_change_the_result(
 
     def attempt(before_write: Callable[[], None]) -> RawResponse:
         before_write()
-        release.wait(10)
+        release.wait(30)
         finished.set()
         return resp()
 
@@ -400,7 +400,7 @@ def test_a_429_then_a_deadline_during_the_retry_connect_is_network_error(
         if len(calls) == 1:
             before_write()
             return resp(429, b"")
-        release.wait(10)  # the retry connect is stuck
+        release.wait(30)  # the retry connect is stuck
         try:
             before_write()
         except GateRefused:
@@ -439,13 +439,13 @@ def test_the_main_thread_can_decide_while_the_worker_is_blocked(release: threadi
 
     def attempt(before_write: Callable[[], None]) -> RawResponse:
         before_write()
-        release.wait(10)  # blocked in a "syscall" with the gate in writing
+        release.wait(30)  # blocked in a "syscall" with the gate in writing
         return resp()
 
     verdict, took = run(ClockGateway(), attempt, gate=gate)
     assert (
         verdict.kind is Kind.DEADLINE and took < DEADLINE_S + LOAD_SLACK_S
-    )  # the blocked worker is held 10 s
+    )  # the blocked worker is held 30 s
     assert not gate._lock.locked()
 
 
@@ -537,7 +537,7 @@ def test_a_crash_in_the_loop_itself_is_internal(
 
 def test_the_stop_callable_is_decided_like_the_deadline(release: threading.Event) -> None:
     def attempt(before_write: Callable[[], None]) -> RawResponse:
-        release.wait(10)
+        release.wait(30)
         return resp()
 
     gateway = ClockGateway()
@@ -546,7 +546,7 @@ def test_the_stop_callable_is_decided_like_the_deadline(release: threading.Event
         gateway, attempt, op=Op.SEND, deadline=gateway.monotonic() + 60, stop=lambda: True
     )
     assert verdict.kind is Kind.DEADLINE and verdict.gate is Gate.IDLE
-    assert time.monotonic() - started < 1.0
+    assert time.monotonic() - started < 1.0 + LOAD_SLACK_S  # the worker is held 30 s
 
 
 def test_a_past_deadline_still_prefers_a_published_result() -> None:

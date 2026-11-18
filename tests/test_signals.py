@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from ha_notice.cli import main
-from ha_notice.deadline import Kind, run_with_deadline
+from ha_notice.deadline import SLICE_S, Kind, WritingGate, run_with_deadline
 from ha_notice.gateway import HANDLED_SIGNALS, RealGateway
 from ha_notice.hass import RawResponse
 from ha_notice.output import flush_streams
@@ -456,12 +456,25 @@ def test_real_gateway_restore_continues_after_one_failure(
 # --- the stop seam of the deadline ---------------------------------------------------------
 
 
+class RecordingGate(WritingGate):
+    """A gate that records every ``wait`` argument the main thread uses."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waits: list[float] = []
+
+    def wait(self, seconds: float) -> bool:
+        self.waits.append(seconds)
+        return super().wait(seconds)
+
+
 def test_stop_wired_to_the_flag_settles_by_the_gate_state() -> None:
     state = SignalState()
+    gate = RecordingGate()
     release = threading.Event()
 
     def attempt(before_write: Callable[[], None]) -> RawResponse:
-        release.wait(10)
+        release.wait(30)
         raise OSError
 
     fake = FakeGateway()
@@ -469,12 +482,19 @@ def test_stop_wired_to_the_flag_settles_by_the_gate_state() -> None:
     started = time.monotonic()
     try:
         verdict = run_with_deadline(
-            fake, attempt, op=Op.SEND, deadline=fake.monotonic() + 60, stop=state.stopped
+            fake,
+            attempt,
+            op=Op.SEND,
+            deadline=fake.monotonic() + 60,
+            stop=state.stopped,
+            gate=gate,
         )
     finally:
         release.set()
     assert verdict.kind is Kind.DEADLINE and verdict.gate is Gate.IDLE
     assert time.monotonic() - started < 1.5 + LOAD_SLACK_S  # noticed within a slice
+    # Deterministic: the main thread never waits longer than one slice, so it can notice the stop.
+    assert gate.waits and max(gate.waits) <= SLICE_S
     assert state.exit_code == 143
 
 

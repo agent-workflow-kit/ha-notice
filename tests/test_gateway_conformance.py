@@ -728,7 +728,7 @@ def test_a_drip_feeding_tls_handshake_is_bounded_by_the_connect_timeout() -> Non
     thread.start()
     real = RealGateway()
     port: int = listener.getsockname()[1]
-    spec = ConnectSpec("https", "127.0.0.1", port, 0.5, 5.0, tls=real.new_tls_context([]))
+    spec = ConnectSpec("https", "127.0.0.1", port, 0.5, 60.0, tls=real.new_tls_context([]))
     conn = real.connect(spec)
     t0 = time.monotonic()
     try:

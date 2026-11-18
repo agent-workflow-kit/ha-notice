@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 import os
 import pwd
+import select
 import ssl
 import stat
 import time
@@ -273,15 +275,34 @@ def test_read_source_fd_reads_until_eof(real: RealGateway) -> None:
 
 
 def test_read_source_fd_stall_times_out_with_what_arrived(
-    real: RealGateway, pipe: tuple[int, int]
+    real: RealGateway, pipe: tuple[int, int], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     r, w = pipe
     os.write(w, b"0123456789")  # ten bytes, then the producer stalls
+    timeouts_ms: list[int] = []
+    real_poll = select.poll
+
+    class RecordingPoll:
+        def __init__(self) -> None:
+            self._poller = real_poll()
+
+        def register(self, fd: int, eventmask: int) -> None:
+            self._poller.register(fd, eventmask)
+
+        def poll(self, timeout: int) -> list[tuple[int, int]]:
+            timeouts_ms.append(timeout)
+            return self._poller.poll(timeout)
+
+    monkeypatch.setattr(gw.select, "poll", RecordingPoll)
     start = time.monotonic()
     res = real.read_source(r, 100, lambda: 0.3 - (time.monotonic() - start))
     elapsed = time.monotonic() - start
     assert (res.data, res.status) == (b"0123456789", "timeout")
     assert 0.25 <= elapsed < 1.5 + LOAD_SLACK_S
+    # The slice is deterministic: no poll waits longer than one slice, and the read stops
+    # once the remaining time is used up (the last poll waits at most what was left).
+    assert timeouts_ms and max(timeouts_ms) <= math.ceil(gw.SLICE_SECONDS * 1000)
+    assert len(timeouts_ms) >= 2 and timeouts_ms[-1] >= 1
 
 
 def test_read_source_notices_the_deadline_within_a_slice(
