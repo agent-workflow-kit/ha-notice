@@ -44,6 +44,7 @@ from http.client import (
     RemoteDisconnected,
     UnknownProtocol,
 )
+from ssl import SSLCertVerificationError, SSLContext, SSLError
 from typing import Literal, NoReturn, Protocol
 
 __all__ = [
@@ -65,6 +66,9 @@ __all__ = [
     "RealGateway",
     "RemoteDisconnected",
     "Response",
+    "SSLCertVerificationError",
+    "SSLContext",
+    "SSLError",
     "SourceError",
     "SourceResult",
     "StateDirError",
@@ -203,21 +207,31 @@ class Gateway(Protocol):
 
     # TLS and HTTP
     def ca_candidates(self) -> CaCandidates: ...
-    def new_tls_context(self, ca_files: Sequence[str]) -> ssl.SSLContext: ...
+    def new_tls_context(
+        self,
+        ca_files: Sequence[str],
+        ca_dirs: Sequence[str] = (),
+        ca_pems: Sequence[bytes] = (),
+    ) -> ssl.SSLContext: ...
+    def has_entries(self, path: str) -> bool: ...
     def connect(self, spec: ConnectSpec) -> Connection: ...
 
     # Process
     def exit_process(self, code: int) -> NoReturn: ...
 
 
-def build_tls_context(ca_files: Sequence[str]) -> ssl.SSLContext:
-    """A strict client context that loads trust only from ``ca_files``.
+def build_tls_context(
+    ca_files: Sequence[str], ca_dirs: Sequence[str] = (), ca_pems: Sequence[bytes] = ()
+) -> ssl.SSLContext:
+    """A strict client context that loads trust only from the sources passed in.
+
+    ``ca_files`` are bundle paths, ``ca_dirs`` hashed-certificate directories and ``ca_pems`` the
+    bytes of a PEM bundle the caller already read (ASCII only), so a file is opened once.
 
     ``load_default_certs`` and ``set_default_verify_paths`` are never called, because they
     follow ``SSL_CERT_FILE`` and ``SSL_CERT_DIR``. Which files to pass (the compiled defaults
-    that are usable, plus the config ``ca_file``) is decided by the HTTP client. A file that
+    that are usable, plus the config ``ca_file``) is decided by ``hass.py``. A source that
     cannot be read or parsed raises ``GatewayError`` with a fixed message (never the path).
-    TODO(#22): trust selection (usable bundle, non-empty directory, fallback files).
     """
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -230,6 +244,20 @@ def build_tls_context(ca_files: Sequence[str]) -> ssl.SSLContext:
         except (OSError, ssl.SSLError, ValueError):
             failed = True
             break
+    for directory in ca_dirs:
+        if failed:
+            break
+        try:
+            ctx.load_verify_locations(capath=directory)
+        except (OSError, ssl.SSLError, ValueError):
+            failed = True
+    for pem in ca_pems:
+        if failed:
+            break
+        try:
+            ctx.load_verify_locations(cadata=pem.decode("ascii"))
+        except (OSError, ssl.SSLError, ValueError):  # UnicodeDecodeError is a ValueError
+            failed = True
     if failed:  # raised outside the handler so no context carries the path
         raise GatewayError("trust file cannot be loaded")
     return ctx
@@ -676,8 +704,21 @@ class RealGateway:
             fallback_files=CA_FALLBACK_FILES,
         )
 
-    def new_tls_context(self, ca_files: Sequence[str]) -> ssl.SSLContext:
-        return build_tls_context(ca_files)
+    def new_tls_context(
+        self,
+        ca_files: Sequence[str],
+        ca_dirs: Sequence[str] = (),
+        ca_pems: Sequence[bytes] = (),
+    ) -> ssl.SSLContext:
+        return build_tls_context(ca_files, ca_dirs, ca_pems)
+
+    def has_entries(self, path: str) -> bool:
+        """True when ``path`` is a directory with at least one entry; False otherwise."""
+        try:
+            with os.scandir(path) as entries:
+                return next(entries, None) is not None
+        except (OSError, ValueError):
+            return False
 
     def connect(self, spec: ConnectSpec) -> _RealConnection:
         """A connection that has not connected yet; call ``connect()`` before ``request()``."""

@@ -586,14 +586,40 @@ basicConstraints = critical,CA:TRUE
 subjectKeyIdentifier = hash
 """
 
+# Only used for an expired certificate: ``openssl ca -selfsign`` can back-date it, ``req`` cannot.
+OPENSSL_CA_CONFIG = """[ca]
+default_ca = selfsign
+[selfsign]
+database = index.txt
+new_certs_dir = .
+serial = serial
+default_md = sha256
+policy = any
+unique_subject = no
+x509_extensions = ext
+[any]
+commonName = supplied
+"""
+
+# Not set anywhere: ``build_tls_context`` does not turn on ``VERIFY_X509_STRICT``, so a leaf
+# without ``CA:TRUE`` (the usual shape of a Home Assistant certificate) verifies as a trust anchor.
+
 
 def make_self_signed_cert(
-    directory: Path, *, sans: tuple[str, ...] = ("IP:127.0.0.1", "DNS:localhost"), name: str = "ha"
+    directory: Path,
+    *,
+    sans: tuple[str, ...] = ("IP:127.0.0.1", "DNS:localhost"),
+    name: str = "ha",
+    rsa: bool = False,
+    is_ca: bool = True,
+    expired: bool = False,
 ) -> tuple[Path, Path]:
     """Write a throwaway self-signed certificate and key; return ``(cert, key)``.
 
     Test-only: it runs the ``openssl`` binary with a private HOME, no inherited configuration and
-    a two-day lifetime. ``sans`` are subjectAltName entries such as ``IP:127.0.0.1``.
+    a two-day lifetime. ``sans`` are subjectAltName entries such as ``IP:127.0.0.1``; an empty
+    tuple leaves the extension out. ``rsa`` makes an RSA key instead of an EC one, ``is_ca``
+    false marks the certificate ``CA:FALSE`` and ``expired`` back-dates it to the year 2020.
     """
     openssl = shutil.which("openssl")
     if openssl is None:
@@ -602,21 +628,57 @@ def make_self_signed_cert(
     config = directory / f"{name}.cnf"
     cert = directory / f"{name}.crt"
     key = directory / f"{name}.key"
-    config.write_text(OPENSSL_CONFIG)
+    text = OPENSSL_CONFIG if is_ca else OPENSSL_CONFIG.replace("CA:TRUE", "CA:FALSE")
+    if sans:
+        text += "subjectAltName = " + ",".join(sans) + "\n"
+    if expired:
+        text += OPENSSL_CA_CONFIG
+    config.write_text(text)
     home = directory / f"{name}-home"
     home.mkdir(exist_ok=True)
     env = {"PATH": "/usr/bin:/bin", "HOME": str(home), "XDG_CONFIG_HOME": str(home)}
-    argv = [
-        openssl, "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
-        "-nodes", "-days", "2", "-config", str(config), "-keyout", str(key), "-out", str(cert),
-        "-addext", "subjectAltName=" + ",".join(sans),
+    keyspec = ["rsa", "-pkeyopt", "rsa_keygen_bits:2048"] if rsa else [
+        "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1"
     ]  # fmt: skip
+    if not expired:
+        argv = [
+            openssl, "req", "-x509", "-newkey", *keyspec, "-nodes", "-days", "2",
+            "-config", str(config), "-keyout", str(key), "-out", str(cert),
+        ]  # fmt: skip
+        _run(argv, env, directory)
+        return cert, key
+    work = directory / f"{name}-ca"
+    work.mkdir(exist_ok=True)
+    (work / "index.txt").write_text("")
+    (work / "serial").write_text("01\n")
+    request = work / "req.csr"
+    _run(
+        [
+            openssl, "req", "-new", "-newkey", *keyspec, "-nodes", "-config", str(config),
+            "-keyout", str(key), "-out", str(request),
+        ],
+        env,
+        directory,
+    )  # fmt: skip
+    _run(
+        [
+            openssl, "ca", "-batch", "-selfsign", "-config", str(config), "-keyfile", str(key),
+            "-in", str(request), "-out", str(cert), "-notext",
+            "-startdate", "20200101000000Z", "-enddate", "20200102000000Z",
+        ],
+        env,
+        work,
+    )  # fmt: skip
+    return cert, key
+
+
+def _run(argv: list[str], env: dict[str, str], cwd: Path) -> None:
     done = subprocess.run(
-        argv, env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=60, check=False
-    )
+        argv, env=env, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, timeout=60,
+        check=False,
+    )  # fmt: skip
     if done.returncode != 0:
         raise RuntimeError(f"openssl failed: {done.stderr.decode(errors='replace')}")
-    return cert, key
 
 
 def json_body(request: RecordedRequest) -> object:

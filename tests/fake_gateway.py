@@ -70,7 +70,8 @@ class ConnectionScript:
     response_error: BaseException | None = None  # raised by getresponse()
     read_error: BaseException | None = None  # raised by read() once read_error_after bytes are out
     read_error_after: int = 0
-    declared_length: int | None = None  # Content-Length; fewer body bytes is IncompleteRead
+    # Content-Length: more body bytes are cut off, fewer is IncompleteRead (also for read(-1)).
+    declared_length: int | None = None
     stall_after_first_byte: threading.Event | None = None  # read() waits after byte one
 
 
@@ -85,18 +86,25 @@ class RecordedRequest:
 class FakeResponse:
     def __init__(self, script: ConnectionScript) -> None:
         self.status = script.status
-        self._body = script.body
+        self._declared = script.declared_length
+        # Like a real peer, at most Content-Length bytes are part of the body.
+        self._body = script.body if self._declared is None else script.body[: self._declared]
         self._pos = 0
         self._stall = script.stall_after_first_byte
         self._read_error = script.read_error
         self._read_error_after = script.read_error_after
-        self._declared = script.declared_length
 
     def read(self, amt: int) -> bytes:
         if self._read_error is not None and self._pos >= self._read_error_after:
             raise self._read_error
         if amt < 0:
             amt = len(self._body) - self._pos
+            chunk = self._body[self._pos : self._pos + amt]
+            self._pos += len(chunk)
+            if self._declared is not None and self._pos < self._declared:
+                # http.client's read() with no size raises IncompleteRead itself.
+                raise http.client.IncompleteRead(chunk, self._declared - self._pos)
+            return chunk
         if self._stall is not None and self._pos >= 1:
             self._stall.wait(WAIT_CAP_SECONDS)
         if self._stall is not None and self._pos == 0:
@@ -331,8 +339,16 @@ class FakeGateway:
     def ca_candidates(self) -> CaCandidates:
         return self.ca
 
-    def new_tls_context(self, ca_files: Sequence[str]) -> gw.ssl.SSLContext:
-        return gw.build_tls_context(ca_files)
+    def new_tls_context(
+        self,
+        ca_files: Sequence[str],
+        ca_dirs: Sequence[str] = (),
+        ca_pems: Sequence[bytes] = (),
+    ) -> gw.ssl.SSLContext:
+        return self._real.new_tls_context(ca_files, ca_dirs, ca_pems)
+
+    def has_entries(self, path: str) -> bool:
+        return self._real.has_entries(path)
 
     def connect(self, spec: ConnectSpec) -> FakeConnection:
         if spec.scheme == "https" and spec.tls is None:
