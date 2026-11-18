@@ -420,6 +420,7 @@ HANDLER_EXIT_CODES = frozenset(
 
 
 def _run(args: list[str], environment: Mapping[str, str], gw: Gateway) -> int:
+    reset_emitted()  # a direct call must not see state leaked from an earlier run
     try:
         inv = parse(args, environment, gw)
     except _ParserExit as done:

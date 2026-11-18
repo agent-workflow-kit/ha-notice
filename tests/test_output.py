@@ -643,6 +643,32 @@ def test_the_emitted_state_does_not_leak_into_the_next_invocation(
     _assert_internal(code, out, err, unknown=False, json_mode=True)
 
 
+def test_run_resets_the_emitted_state_itself(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output.reset_emitted()
+    fail(True, "refused", reason="empty_message")  # leaks state for a direct _run call
+    capsys.readouterr()
+    monkeypatch.setitem(cli.HANDLERS, "send", _boom)
+    code = cli._run(["--json", "send", "--message=a"], {}, FakeGateway())  # type: ignore[arg-type]
+    assert code == 1
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "internal"
+
+
+def test_the_envelope_is_recorded_only_after_the_stdout_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output.reset_emitted()
+    seen: list[int | None] = []
+    monkeypatch.setattr(
+        output, "write_text", lambda stream, text: seen.append(output.emitted_exit())
+    )
+    fail(True, "refused", reason="empty_message")
+    assert seen[0] is None  # the stdout write happens before the state is recorded
+    assert output.emitted_exit() == 20
+    output.reset_emitted()
+
+
 def test_help_and_version_are_not_internal_errors(run: Any) -> None:
     assert run(["--help"])[0] == 0
     assert run(["--version"])[0] == 0

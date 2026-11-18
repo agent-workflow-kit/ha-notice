@@ -373,7 +373,11 @@ def emitted_exit() -> int | None:
 
 
 def record_emitted(exit_code: int) -> None:
-    """Note that this invocation has printed its envelope (first call wins)."""
+    """Note that this invocation has printed its envelope (first call wins).
+
+    TODO(#27): every success printer (sent object, dry-run text, probe) must call
+    record_emitted(0) so a later exception cannot produce a second envelope.
+    """
     if not _emitted:
         _emitted.append(exit_code)
 
@@ -384,10 +388,10 @@ def emit_error(json_mode: bool, error: ErrorResult) -> None:
     if not isinstance(error, ErrorResult):
         raise TypeError("emit_error takes the result of build_error")
     envelope = error.envelope
-    record_emitted(error.exit_code)
     body = envelope["error"]
     if json_mode:
         write_text(sys.stdout, dumps(envelope) + "\n")
+    record_emitted(error.exit_code)  # after the stdout write attempt, not before
     label = f"refused ({body['reason']})" if body["code"] == "refused" else body["code"]
     write_text(sys.stderr, f"{label}: {body['message']}\n")
 
