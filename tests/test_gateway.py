@@ -575,6 +575,29 @@ def test_state_file_size_of_a_closed_descriptor_is_a_state_error(
         real.state_file_size(fd)
 
 
+def test_state_file_truncate_cuts_an_appended_file_back(
+    real: RealGateway, state: tuple[int, Path]
+) -> None:
+    fd = real.open_state_file(state[0], "log.jsonl", append=True)
+    try:
+        real.write_fd(fd, b"abcdef")
+        real.state_file_truncate(fd, 2)
+        assert real.state_file_size(fd) == 2
+        real.write_fd(fd, b"Z")  # O_APPEND: goes to the new end
+        assert (state[1] / "log.jsonl").read_bytes() == b"abZ"
+    finally:
+        real.close_fd(fd)
+
+
+def test_state_file_truncate_of_a_closed_descriptor_is_a_state_error(
+    real: RealGateway, state: tuple[int, Path]
+) -> None:
+    fd = real.open_state_file(state[0], "log.jsonl", append=True)
+    real.close_fd(fd)
+    with pytest.raises(StateDirError):
+        real.state_file_truncate(fd, 0)
+
+
 @pytest.mark.parametrize("src,dst", [("a/b", "c"), ("a", "../c"), ("", "c")])
 def test_rename_names_must_be_plain(
     real: RealGateway, state: tuple[int, Path], src: str, dst: str

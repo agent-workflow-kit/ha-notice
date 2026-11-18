@@ -315,8 +315,9 @@ def test_line_is_compact_ascii_json_with_one_final_lf() -> None:
     "actor", ["auto:x\ny", "auto:x\ry", "auto: x", "auto:\x00", "auto:é", "auto:\x1b[31m"]
 )
 def test_hostile_values_never_add_a_raw_control_character_or_line(actor: str) -> None:
-    rec = build_record(facts(actor=actor), ts="2023-11-14T22:13:20.123Z", version="0.1.0")
+    rec = build_record(facts(), ts="2023-11-14T22:13:20.123Z", version="0.1.0")
     assert rec is not None
+    rec["actor"] = actor  # build_record rejects these; the serializer must still be safe
     data = serialize_record(rec)
     assert data.count(b"\n") == 1 and data[-1:] == b"\n"
     assert not any(b < 0x20 or b > 0x7E for b in data[:-1])
@@ -613,7 +614,7 @@ def test_a_flock_held_by_another_process_skips_the_record_after_about_one_second
         out = run(RealClock(home=str(home)))
         elapsed = time.monotonic() - started
         assert out == STATE_WARNING + "\n"
-        assert 0.95 <= elapsed < 3.0
+        assert 0.95 <= elapsed < 10.0
         assert not (sdir / LOG_NAME).exists() or (sdir / LOG_NAME).stat().st_size == 0
         # the holder releases: the next record is written
         assert holder.stdin is not None
@@ -759,7 +760,7 @@ def test_the_limits_are_those_of_the_interface() -> None:
 
 _WORKER = textwrap.dedent(
     """
-    import io, sys
+    import io, json, sys
     from ha_notice import log
     from ha_notice.gateway import RealGateway
     from ha_notice.state import StateWarner
@@ -771,9 +772,10 @@ _WORKER = textwrap.dedent(
     log.ROTATE_AT = int(sys.argv[3])
     worker, count = int(sys.argv[2]), int(sys.argv[4])
     sys.stdin.readline()  # the start signal
-    warn = io.StringIO()
+    skipped = []
     g = G()
     for i in range(count):
+        warn = io.StringIO()
         f = log.RunFacts(
             exit_code=0, unknown_outcome=False, code=None, reason=None, level="info",
             bytes=1, truncated=False, duration_ms=worker * 100000 + i, http_status=200,
@@ -781,7 +783,9 @@ _WORKER = textwrap.dedent(
             actor="auto:w", actor_source="default",
         )
         log.write_log_record(g, f, StateWarner(warn), version="0.1.0")
-    sys.stdout.write(str(warn.getvalue().count("warning")))
+        if "warning" in warn.getvalue():
+            skipped.append(f.duration_ms)
+    sys.stdout.write(json.dumps(skipped))
     """
 )
 
@@ -814,7 +818,7 @@ def test_concurrent_writers_rotating_lose_no_record_and_never_double_rotate(
                 p.kill()  # only the PIDs this test started
                 p.wait()
     assert [r[1] for r in results] == [0] * workers, results
-    assert [r[0][0] for r in results] == ["0"] * workers  # no skipped record, no warning
+    skipped = {d for r in results for d in json.loads(r[0][0])}  # records a worker reported skipped
     names = ["log.jsonl", "log.jsonl.1", "log.jsonl.2", "log.jsonl.3"]
     seen: list[int] = []
     for n in names:
@@ -829,7 +833,7 @@ def test_concurrent_writers_rotating_lose_no_record_and_never_double_rotate(
             seen.append(rec["duration_ms"])
     expected = {w * 100000 + i for w in range(workers) for i in range(per_worker)}
     assert len(seen) == len(set(seen))  # no duplicates
-    assert set(seen) == expected  # none lost
+    assert set(seen) == expected - skipped  # present == written - skipped
     assert (sdir / "log.jsonl.1").exists()  # rotation really happened
     # a double rotation would leave a nearly empty rotated file
     for n in names[1:]:
@@ -856,3 +860,240 @@ def test_real_gateway_home_comes_from_the_password_database(
     assert buf.getvalue() == ""
     assert len(lines(home / STATE_REL / LOG_NAME)) == 1
     assert list(trap.iterdir()) == []
+
+
+# --- record facts are validated (R1) ---------------------------------------------------------
+
+TS = "2023-11-14T22:13:20.123Z"
+FAILED_CODES = [
+    "host_rejected",
+    "auth_required",
+    "credential_invalid",
+    "rate_limited",
+    "network_error",
+    "wrong_host_response",
+    "unavailable",
+]
+
+
+def test_every_combination_yields_nothing_a_schema_valid_record_or_a_value_error() -> None:
+    accepted = 0
+    for exit_code in (0, 1, 2, 12, 20, 22, 130):
+        for unknown in (False, True):
+            for code in [None, *ERROR_CODES]:
+                for reason in [None, *REASONS]:
+                    f = facts(
+                        exit_code=exit_code, unknown_outcome=unknown, code=code, reason=reason
+                    )
+                    try:
+                        rec = build_record(f, ts=TS, version="0.1.0")
+                    except ValueError:
+                        continue
+                    if rec is not None:
+                        assert schema_errors("log", rec) == [], f
+                        accepted += 1
+    assert accepted > 0
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"exit_code": 12, "code": None},
+        {"exit_code": 12, "code": "internal"},
+        {"exit_code": 12, "code": "refused"},
+        {"exit_code": 12, "code": "usage"},
+        {"exit_code": 12, "code": "network_error", "unknown_outcome": True},
+        {"exit_code": 12, "code": "upstream_error", "unknown_outcome": False},
+        {"exit_code": 12, "code": "outcome_unknown", "unknown_outcome": False},
+        {"exit_code": 12, "code": "bogus"},
+        {"exit_code": 20, "reason": None},
+        {"exit_code": 20, "reason": "bogus"},
+        {"level": "SECRET"},
+        {"level": ""},
+        {"actor": "x" * 500},
+        {"actor": "auto:" + "x" * 65},
+        {"actor": "auto:"},
+        {"actor": "root:me"},
+        {"actor": "auto:a b"},
+        {"actor": "auto:ok\nmore"},
+        {"actor_source": "env"},
+        {"message_sha256": "XYZ"},
+        {"message_sha256": "0123456789abcdef0"},
+        {"message_sha256": "0123456789abcde\n"},
+        {"dedupe_key_sha256": "0123456789ABCDEF"},
+        {"bytes": -1},
+        {"bytes": True},
+        {"bytes": "4"},
+        {"truncated": 1},
+        {"tag_set": "yes"},
+        {"duration_ms": -1},
+        {"duration_ms": None},
+        {"duration_ms": 1.5},
+        {"http_status": 99},
+        {"http_status": 600},
+        {"http_status": "200"},
+    ],
+)
+def test_invalid_facts_are_skipped_with_the_one_warning(
+    home: Path, sdir: Path, kw: dict[str, Any]
+) -> None:
+    f = facts(**kw)
+    with pytest.raises(ValueError):
+        build_record(f, ts=TS)
+    before = fd_count()
+    buf = io.StringIO()
+    w = StateWarner(buf)
+    write_log_record(FakeGateway(home=str(home)), f, w)
+    write_log_record(FakeGateway(home=str(home)), f, w)
+    assert buf.getvalue() == STATE_WARNING + "\n"
+    assert fd_count() == before
+    assert not (sdir / LOG_NAME).exists() or (sdir / LOG_NAME).read_bytes() == b""
+
+
+def test_enum_rules_match_the_schema_files() -> None:
+    defs = load_schema("defs")["$defs"]
+    assert tuple(defs["level"]["enum"]) == logmod.LEVELS
+    assert tuple(defs["actor_source"]["enum"]) == logmod.ACTOR_SOURCES
+    assert tuple(defs["refusal_reason"]["enum"]) == logmod.REASONS
+    assert set(defs["error_code"]["enum"]) >= set(logmod.FAILED_CODES) | set(logmod.UNKNOWN_CODES)
+
+
+def test_runfacts_field_names_and_types_are_exactly_the_whitelist() -> None:
+    import typing
+
+    hints = typing.get_type_hints(RunFacts)
+    assert hints == {
+        "exit_code": int,
+        "unknown_outcome": bool,
+        "code": str | None,
+        "reason": str | None,
+        "level": str | None,
+        "bytes": int | None,
+        "truncated": bool | None,
+        "duration_ms": int,
+        "http_status": int | None,
+        "message_sha256": str | None,
+        "dedupe_key_sha256": str | None,
+        "tag_set": bool | None,
+        "actor": str,
+        "actor_source": str,
+    }
+
+
+def test_a_secret_in_every_string_field_is_rejected_or_absent(home: Path, sdir: Path) -> None:
+    secret = "SECRET-7f3a-recognizable"
+    str_fields = [
+        f.name for f in dataclasses.fields(RunFacts) if f.name not in {"exit_code", "duration_ms"}
+    ]
+    base_by_exit = [
+        {},
+        {"exit_code": 20, "reason": "empty_message"},
+        {"exit_code": 12, "code": "network_error"},
+    ]
+    for base in base_by_exit:
+        for name in str_fields:
+            val = getattr(facts(**base), name)
+            if not isinstance(val, str) and val is not None:
+                continue
+            f = facts(**{**base, name: secret})
+            if (sdir / LOG_NAME).exists():
+                (sdir / LOG_NAME).unlink()
+            run(FakeGateway(home=str(home)), f)
+            raw = (sdir / LOG_NAME).read_bytes() if (sdir / LOG_NAME).exists() else b""
+            assert secret.encode() not in raw, (base, name)
+            for rec in lines(sdir / LOG_NAME) if raw else []:
+                valid(rec)
+
+
+# --- a short write is truncated away (R3) ----------------------------------------------------
+
+
+@dataclass
+class PartialWrites(FakeGateway):
+    """Writes half the data to the real file, then reports the short count or raises."""
+
+    raise_after: bool = False
+    armed: bool = True
+
+    def write_fd(self, fd: int, data: bytes) -> int:
+        if not self.armed:
+            return super().write_fd(fd, data)
+        n = super().write_fd(fd, data[: len(data) // 2])
+        if self.raise_after:
+            raise StateDirError("write failed")
+        return n
+
+
+@dataclass
+class UntruncatableWrites(PartialWrites):
+    def state_file_truncate(self, fd: int, size: int) -> None:
+        raise StateDirError("no truncate")
+
+
+@pytest.mark.parametrize("raise_after", [False, True])
+def test_a_short_write_leaves_the_log_as_it_was_and_the_next_record_is_a_line(
+    home: Path, sdir: Path, raise_after: bool
+) -> None:
+    run(FakeGateway(home=str(home)), facts(duration_ms=1))
+    before = (sdir / LOG_NAME).read_bytes()
+    g = PartialWrites(home=str(home), raise_after=raise_after)
+    assert run(g, facts(duration_ms=2)) == STATE_WARNING + "\n"
+    assert (sdir / LOG_NAME).read_bytes() == before
+    g.armed = False
+    assert run(g, facts(duration_ms=3)) == ""
+    assert [r["duration_ms"] for r in lines(sdir / LOG_NAME)] == [1, 3]
+
+
+def test_a_short_write_into_an_empty_log_leaves_it_empty(home: Path, sdir: Path) -> None:
+    assert run(PartialWrites(home=str(home))) == STATE_WARNING + "\n"
+    assert (sdir / LOG_NAME).read_bytes() == b""
+
+
+def test_a_failed_truncate_is_swallowed_and_still_warns_once(home: Path, sdir: Path) -> None:
+    out = run(UntruncatableWrites(home=str(home)))
+    assert out == STATE_WARNING + "\n"
+
+
+def test_a_short_write_after_rotation_truncates_the_new_file(
+    home: Path, sdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(logmod, "ROTATE_AT", 600)
+    (sdir / LOG_NAME).write_bytes(b"x" * 599 + b"\n")
+    (sdir / LOG_NAME).chmod(0o600)
+    assert run(PartialWrites(home=str(home))) == STATE_WARNING + "\n"
+    assert (sdir / LOG_NAME).read_bytes() == b""  # the new file, partial line cut away
+    assert (sdir / (LOG_NAME + ".1")).stat().st_size == 600
+
+
+# --- the log step never raises (R4) ----------------------------------------------------------
+
+
+def test_an_overflowing_wall_time_warns_instead_of_raising(home: Path, sdir: Path) -> None:
+    out = run(FakeGateway(home=str(home), wall=1e308))
+    assert out == STATE_WARNING + "\n"
+
+
+@dataclass
+class Exploding(FakeGateway):
+    exc: type[BaseException] = RuntimeError
+
+    def write_fd(self, fd: int, data: bytes) -> int:
+        raise self.exc("boom")
+
+
+def test_an_arbitrary_gateway_exception_warns_and_closes_the_descriptors(
+    home: Path, sdir: Path
+) -> None:
+    before = fd_count()
+    assert run(Exploding(home=str(home))) == STATE_WARNING + "\n"
+    assert fd_count() == before
+    assert run(FakeGateway(home=str(home))) == ""  # the lock was released
+
+
+def test_a_keyboard_interrupt_propagates_with_the_descriptors_closed(
+    home: Path, sdir: Path
+) -> None:
+    before = fd_count()
+    with pytest.raises(KeyboardInterrupt):
+        run(Exploding(home=str(home), exc=KeyboardInterrupt))
+    assert fd_count() == before

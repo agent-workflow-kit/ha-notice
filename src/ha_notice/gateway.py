@@ -197,6 +197,7 @@ class Gateway(Protocol):
         self, dir_fd: int, src: str, dst: str, *, missing_ok: bool = False
     ) -> None: ...
     def state_file_size(self, fd: int) -> int: ...
+    def state_file_truncate(self, fd: int, size: int) -> None: ...
     def write_fd(self, fd: int, data: bytes) -> int: ...
     def close_fd(self, fd: int) -> None: ...
 
@@ -645,6 +646,13 @@ class RealGateway:
             return os.fstat(fd).st_size
         except OSError:
             raise StateDirError("state file cannot be examined") from None
+
+    def state_file_truncate(self, fd: int, size: int) -> None:
+        """Cut an open state file back to ``size`` bytes (used to drop a partial append)."""
+        try:
+            os.ftruncate(fd, size)
+        except OSError:
+            raise StateDirError("state file cannot be truncated") from None
 
     def write_fd(self, fd: int, data: bytes) -> int:
         try:

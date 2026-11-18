@@ -55,6 +55,9 @@ class StateDir:
     def size(self, fd: int) -> int:
         return self._call(lambda: self._gateway.state_file_size(fd))
 
+    def truncate(self, fd: int, size: int) -> None:
+        self._call(lambda: self._gateway.state_file_truncate(fd, size))
+
     def close_file(self, fd: int) -> None:
         """Close a descriptor returned by ``open_file`` (releases a lock held on it)."""
         self._gateway.close_fd(fd)

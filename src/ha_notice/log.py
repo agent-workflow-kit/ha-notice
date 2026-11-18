@@ -10,14 +10,24 @@ before ``log.jsonl`` is opened, so the size check, the rotation and the append a
 section across processes and the file opened is the one that exists after any other process's
 rotation. Any state problem prints the fixed warning once and never raises.
 
+A record whose facts break the schema's rules (an enum, the outcome/code/reason matrix, a hash
+or actor grammar, a range) is never written: ``build_record`` raises ``ValueError`` and the step
+warns once. A short or failed write is cut back (best effort) to the size before it, so no
+partial line is left for the next record to be glued to.
+
 TODO(#27): call ``write_log_record`` from ``send.deliver`` after the result is printed (and skip
-it when config ``log`` is false); the signal exits (128+N) are never logged (#26).
+it when config ``log`` is false); the signal exits (128+N) are never logged (#26). The criteria
+that need ``send.py`` are deferred to #27 with it: the result is printed and flushed before the
+log step; the log step stays within timeout + 3 s with the lock held by another process;
+``log: false`` and dry runs touch nothing; and the send-level checks (a FIFO or symlinked log
+entry costs one warning, never a hang or a changed exit code).
 """
 
 from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -51,6 +61,23 @@ LOCK_BUDGET = 1.0
 MAX_RECORD = 1024  # a record is written only when it is shorter than this
 _VERSION_MAX = 64
 _MAX_TS = 253_402_300_799  # 9999-12-31T23:59:59Z
+
+# The schema's rules (schemas/defs.json, schemas/log.json); tests pin these to the schema files.
+LEVELS = ("info", "warn", "action", "error")
+ACTOR_SOURCES = ("flag", "tty", "default")
+REASONS = ("invalid_payload", "empty_message", "command_keyword", "link_invalid", "link_scheme")
+FAILED_CODES = (
+    "host_rejected",
+    "auth_required",
+    "credential_invalid",
+    "rate_limited",
+    "network_error",
+    "wrong_host_response",
+    "unavailable",
+)
+UNKNOWN_CODES = ("outcome_unknown", "upstream_error", "wrong_host_response")
+_SHA16 = re.compile(r"[0-9a-f]{16}\Z")
+_ACTOR = re.compile(r"(human|auto):[A-Za-z0-9._@/-]{1,64}\Z")
 
 
 @dataclass(frozen=True)
@@ -102,7 +129,10 @@ def format_ts(wall_time: float) -> str:
 
 
 def build_record(facts: RunFacts, *, ts: str, version: str = __version__) -> dict[str, Any] | None:
-    """The record for a run (keys in schema order), or None when the run is not logged."""
+    """The record for a run (keys in schema order), or None when the run is not logged.
+
+    Raises ``ValueError`` when the facts would make a record that breaks the schema.
+    """
     outcome = outcome_for(facts.exit_code, facts.unknown_outcome)
     if outcome is None:
         return None
@@ -115,6 +145,7 @@ def build_record(facts: RunFacts, *, ts: str, version: str = __version__) -> dic
         code, reason = facts.code, None
     else:
         code, reason = None, None
+    _check_facts(facts, outcome, code, reason)
     return {
         "ts": ts,
         "tool": "ha-notice",
@@ -136,6 +167,45 @@ def build_record(facts: RunFacts, *, ts: str, version: str = __version__) -> dic
     }
 
 
+def _is_int(value: object, low: int, high: int | None = None) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= low
+        and (high is None or value <= high)
+    )
+
+
+def _check_facts(facts: RunFacts, outcome: str, code: object, reason: object) -> None:
+    """Raise ValueError unless the record would satisfy schemas/log.json."""
+    if outcome == "failed":
+        ok = code in FAILED_CODES
+    elif outcome == "outcome_unknown":
+        ok = code == "internal" if facts.exit_code == 1 else code in UNKNOWN_CODES
+    elif outcome == "refused":
+        ok = code == "refused" and reason in REASONS
+    else:
+        ok = code is None
+    if not ok:
+        raise ValueError("code and reason do not fit the outcome")
+    checks = (
+        facts.level is None or facts.level in LEVELS,
+        facts.bytes is None or _is_int(facts.bytes, 0),
+        facts.truncated is None or isinstance(facts.truncated, bool),
+        _is_int(facts.duration_ms, 0),
+        facts.http_status is None or _is_int(facts.http_status, 100, 599),
+        facts.message_sha256 is None
+        or (isinstance(facts.message_sha256, str) and _SHA16.match(facts.message_sha256)),
+        facts.dedupe_key_sha256 is None
+        or (isinstance(facts.dedupe_key_sha256, str) and _SHA16.match(facts.dedupe_key_sha256)),
+        facts.tag_set is None or isinstance(facts.tag_set, bool),
+        isinstance(facts.actor, str) and _ACTOR.match(facts.actor),
+        facts.actor_source in ACTOR_SOURCES,
+    )
+    if not all(checks):
+        raise ValueError("a fact breaks the log schema")
+
+
 def serialize_record(record: dict[str, Any]) -> bytes:
     """One compact, pure-ASCII JSON line ending in LF (control characters are escaped)."""
     return json.dumps(record, ensure_ascii=True, separators=(",", ":")).encode("ascii") + b"\n"
@@ -145,6 +215,9 @@ def write_log_record(
     gateway: Gateway, facts: RunFacts, warner: StateWarner, *, version: str = __version__
 ) -> None:
     """Append the run's record to ``log.jsonl``; never raises, never changes an exit code.
+
+    Any ``Exception`` (not ``BaseException``: an interrupt still propagates, with the
+    descriptors closed) becomes the one fixed warning.
 
     A run that is not logged touches nothing. An unusable state, a lock busy after the budget,
     a failed rotation or write, an over-long record or an impossible clock each print the fixed
@@ -158,7 +231,7 @@ def write_log_record(
         if len(line) >= MAX_RECORD:
             raise StateUnusable
         _append(gateway, line)
-    except (StateUnusable, ValueError):
+    except Exception:
         warner.warn()
 
 
@@ -178,14 +251,27 @@ def _append(gateway: Gateway, line: bytes) -> None:
             log_fd = -1
             _rotate(state)
             log_fd = state.open_file(LOG_NAME, append=True)  # the record goes to the new file
-        if state.write(log_fd, line) != len(line):
-            raise StateUnusable
+        _append_line(state, log_fd, line)
     finally:
         if log_fd >= 0:
             state.close_file(log_fd)
         if lock_fd >= 0:
             state.close_file(lock_fd)  # closing releases the flock
         state.close()
+
+
+def _append_line(state: Any, log_fd: int, line: bytes) -> None:
+    """One write; on a short write or an error, cut the file back to its size before it."""
+    before = state.size(log_fd)
+    try:
+        if state.write(log_fd, line) != len(line):
+            raise StateUnusable
+    except BaseException:
+        try:
+            state.truncate(log_fd, before)  # the lock is held and the file is O_APPEND
+        except Exception:
+            pass  # best effort; the warning is still printed once
+        raise
 
 
 def _rotate(state: Any) -> None:

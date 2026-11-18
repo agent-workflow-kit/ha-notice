@@ -318,6 +318,9 @@ class FakeGateway:
     def state_file_size(self, fd: int) -> int:
         return self._real.state_file_size(fd)
 
+    def state_file_truncate(self, fd: int, size: int) -> None:
+        self._real.state_file_truncate(fd, size)
+
     def write_fd(self, fd: int, data: bytes) -> int:
         return self._real.write_fd(fd, data)
 
