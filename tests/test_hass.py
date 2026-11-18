@@ -470,9 +470,9 @@ def test_a_refusing_gate_writes_nothing_and_closes() -> None:
     with FakeHA() as ha:
         with pytest.raises(Refused):
             send_once(RealGateway(), target_for(ha), SERVICE, BODY, before_write=gate)
-    deadline = time.monotonic() + 5
-    while ha.connections < 1 and time.monotonic() < deadline:
-        time.sleep(0.01)
+        deadline = time.monotonic() + 5
+        while ha.connections < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)  # the accept thread counts the connection a moment later
     assert ha.connections == 1
     assert ha.requests == [] and all(r == b"" for r in ha.received)
 
