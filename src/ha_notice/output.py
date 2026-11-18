@@ -76,7 +76,30 @@ REASON_MESSAGES: dict[str, str] = {
 
 MESSAGE_MAX = 2048
 KEY_MAX = 4096
-HINT_MAX = 512
+# interface.md, send: the 400 answer of the host carries this one fixed hint.
+HOST_REJECTED_HINT = "check the notify service name and the message; run validate --test-message"
+# The only message overrides: the fixed usage messages of cli.py and the not-implemented guard.
+OVERRIDE_MESSAGES = frozenset(
+    {
+        "--actor does not match (human|auto):NAME",
+        "--dedupe-key is not valid UTF-8",
+        "--dedupe-key is too long",
+        "--stdin-json cannot be combined with --file",
+        "--verbose and --quiet cannot be combined",
+        "a JSON source cannot be combined with text flags",
+        "a flag value is empty",
+        "a flag was given more than once",
+        "a value that starts with - needs the --flag=value form",
+        "invalid command line; see ha-notice --help",
+        "no command given",
+        "no input: stdin is a terminal and no source was given",
+        "single-dash options are not accepted",
+        "stdin is a terminal",
+        "text flags need --message",
+        "unexpected --",
+        "command not implemented",
+    }
+)
 _KEY_RE = re.compile(r"[A-Za-z0-9_]{1,64}")
 _FIELD_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _POINTER_RE = re.compile(r"(?:|/(?:[A-Za-z0-9_-]{1,64}|\?))")
@@ -89,14 +112,18 @@ _DETAILS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "auth_required": (("http_status",), ()),
     "rate_limited": (("http_status",), ()),
     "upstream_error": (("http_status",), ()),
+    # TODO(#27): BadStatusLine, LineTooLong and UnknownProtocol (an answer that is not HTTP after
+    # writing, interface.md: wrong_host_response with unknown_outcome true) carry no status, but
+    # schemas/defs.json requires http_status here. #27 must map them to a status or the
+    # schema/builder must allow a missing status.
     "wrong_host_response": (("http_status",), ()),
-    "host_rejected": (("http_status",), ("hint",)),
+    "host_rejected": (("http_status", "hint"), ()),
     "network_error": (("tls", "timeout"), ()),
 }
 _DETAIL_ORDER = ("key", "pointer", "env", "phase", "http_status", "hint", "tls", "timeout")
 
 
-def error_envelope(
+def _error_envelope(
     code: str,
     message: str,
     *,
@@ -106,7 +133,7 @@ def error_envelope(
     retry_after_s: int | float | None = None,
     unknown_outcome: bool | None = None,
 ) -> dict[str, Any]:
-    """The raw envelope with the keys in document order. Prefer ``build_error``."""
+    """The raw envelope with the keys in document order. Use ``build_error``."""
     return {
         "error": {
             "code": code,
@@ -127,7 +154,12 @@ class ErrorResult:
 
 
 def safe_key(name: str) -> str:
-    """``details.key`` for a config key name: the name when it is plain, else ``?``."""
+    """``details.key`` for a config key name: the name when it is plain, else ``?``.
+
+    Callers own this call for every config key name read from a file. Fixed literals (``--config``,
+    ``home``) and file paths are passed to ``build_error`` as they are, not through here.
+    TODO(#8): config key names must pass through ``safe_key`` where ``config_invalid`` is built.
+    """
     return name if _KEY_RE.fullmatch(name) else "?"
 
 
@@ -153,6 +185,8 @@ def _check_details(code: str, reason: str | None, given: dict[str, Any]) -> dict
         elif reason == "link_invalid":
             allowed = {"pointer"}
     if code == "unavailable":
+        if given.get("phase", "input") != "input":
+            raise ValueError("phase is always input")
         given = {**given, "phase": "input"}
     extra = set(given) - allowed
     if extra:
@@ -164,7 +198,7 @@ def _check_details(code: str, reason: str | None, given: dict[str, Any]) -> dict
         if name == "key":
             if not isinstance(value, str):
                 raise ValueError("key must be a string")
-            if len(value) > KEY_MAX:
+            if len(value) > KEY_MAX or not value.isprintable():
                 given[name] = "?"
         elif name == "pointer":
             ok = isinstance(value, str) and _POINTER_RE.fullmatch(value)
@@ -173,15 +207,13 @@ def _check_details(code: str, reason: str | None, given: dict[str, Any]) -> dict
         elif name == "env":
             if not _clean_line(value, 256):
                 raise ValueError("env must be a short printable string")
-        elif name == "phase":
-            if value != "input":
-                raise ValueError("phase is always input")
         elif name == "http_status":
-            if type(value) is not int or not 100 <= value <= 599:
+            if not isinstance(value, int) or isinstance(value, bool) or not 100 <= value <= 599:
                 raise ValueError("http_status must be an integer from 100 to 599")
+            given[name] = int(value)
         elif name == "hint":
-            if not _clean_line(value, HINT_MAX):
-                raise ValueError("hint must be a short printable string")
+            if value != HOST_REJECTED_HINT or given.get("http_status") != 400:
+                raise ValueError("hint is the fixed host_rejected hint with http_status 400")
         elif name in ("tls", "timeout") and type(value) is not bool:
             raise ValueError(f"{name} must be a boolean")
     return {name: given[name] for name in _DETAIL_ORDER if name in given}
@@ -223,8 +255,8 @@ def build_error(
     ``details`` are the fields of ``details`` (``key``, ``pointer``, ``env``, ``http_status``,
     ``hint``, ``tls``, ``timeout``; ``phase`` is added for ``unavailable``). ``tag_sent`` says that
     the request carried a dedupe tag; ``after_writing`` that an internal failure happened after
-    the gate reached ``writing``. ``message`` overrides the fixed message and must be one printable
-    line (callers pass only fixed strings). Raises ``ValueError`` for anything that would not be a
+    the gate reached ``writing``. ``message`` overrides the fixed message and must be one of
+    ``OVERRIDE_MESSAGES``. Raises ``ValueError`` for anything that would not be a
     schema-valid envelope.
     """
     if not isinstance(code, str) or code not in EXIT_CODES:
@@ -238,23 +270,29 @@ def build_error(
     else:
         text = MESSAGES[code]
     if message is not None:
+        if message not in OVERRIDE_MESSAGES:
+            raise ValueError("message is not an allowed override")
         text = message
     if not _clean_line(text, MESSAGE_MAX):
         raise ValueError("message must be one printable line")
     if after_writing and code != "internal":
         raise ValueError("after_writing is only for internal")
     if code == "rate_limited":
-        if (
-            type(retry_after_s) not in (int, float)
-            or not math.isfinite(retry_after_s)  # type: ignore[arg-type]
-            or retry_after_s < 0  # type: ignore[operator]
-        ):
+        try:
+            ok = (
+                type(retry_after_s) in (int, float)
+                and math.isfinite(retry_after_s)  # type: ignore[arg-type]
+                and retry_after_s >= 0  # type: ignore[operator]
+            )
+        except OverflowError:  # an int too large for a float
+            ok = False
+        if not ok:
             raise ValueError("rate_limited needs retry_after_s >= 0")
     elif retry_after_s is not None:
         raise ValueError("retry_after_s is only for rate_limited")
     checked = _check_details(code, reason, dict(details))
     retryable, unknown = _flags(code, checked, tag_sent, after_writing)
-    envelope = error_envelope(
+    envelope = _error_envelope(
         code,
         text,
         reason=reason,
@@ -321,10 +359,32 @@ def dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
 
 
-def emit_error(json_mode: bool, error: ErrorResult | dict[str, Any]) -> None:
+_emitted: list[int] = []
+
+
+def reset_emitted() -> None:
+    """Forget what the previous invocation printed (``cli.main`` calls this first)."""
+    _emitted.clear()
+
+
+def emitted_exit() -> int | None:
+    """The exit code of the first envelope or outcome printed by this invocation, else None."""
+    return _emitted[0] if _emitted else None
+
+
+def record_emitted(exit_code: int) -> None:
+    """Note that this invocation has printed its envelope (first call wins)."""
+    if not _emitted:
+        _emitted.append(exit_code)
+
+
+def emit_error(json_mode: bool, error: ErrorResult) -> None:
     """The envelope on stdout with ``--json``, then one line on stderr: ``<code>: <message>``,
     or ``refused (<reason>): <message>`` for exit 20. Stdout is written and flushed first."""
-    envelope = error.envelope if isinstance(error, ErrorResult) else error
+    if not isinstance(error, ErrorResult):
+        raise TypeError("emit_error takes the result of build_error")
+    envelope = error.envelope
+    record_emitted(error.exit_code)
     body = envelope["error"]
     if json_mode:
         write_text(sys.stdout, dumps(envelope) + "\n")
@@ -346,4 +406,5 @@ def emit_disabled(json_mode: bool) -> int:
         write_text(sys.stdout, dumps({"outcome": "disabled"}) + "\n")
     else:
         write_text(sys.stderr, "disabled in config\n")
+    record_emitted(EXIT_DISABLED)
     return EXIT_DISABLED

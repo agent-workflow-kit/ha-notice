@@ -28,6 +28,7 @@ from tests.harness import Golden, schema_errors
 
 Result = tuple[int, str, str]
 
+HINT = output.HOST_REJECTED_HINT
 RESPONSE_CODES = ("auth_required", "host_rejected", "rate_limited", "upstream_error")
 
 
@@ -84,7 +85,7 @@ def test_exit_code_constants() -> None:
 
 # code, extra kwargs, (retryable, unknown_outcome) without a tag, the same with a tag
 EXIT_12_CELLS: list[tuple[str, dict[str, Any], tuple[bool, bool], tuple[bool, bool]]] = [
-    ("host_rejected", {"http_status": 400}, (False, False), (False, False)),
+    ("host_rejected", {"http_status": 400, "hint": HINT}, (False, False), (False, False)),
     ("auth_required", {"http_status": 401}, (False, False), (False, False)),
     ("credential_invalid", {"env": "HA_TOKEN"}, (False, False), (False, False)),
     ("rate_limited", {"http_status": 429, "retry_after_s": 4}, (True, False), (True, False)),
@@ -203,8 +204,8 @@ def test_after_writing_is_only_for_internal() -> None:
 def test_details_by_code() -> None:
     assert _valid(build_error("config_invalid", key="base_url"))["details"] == {"key": "base_url"}
     assert _valid(build_error("credential_invalid", env="HA_X"))["details"] == {"env": "HA_X"}
-    got = _valid(build_error("host_rejected", http_status=400, hint="check the service"))
-    assert got["details"] == {"http_status": 400, "hint": "check the service"}
+    got = _valid(build_error("host_rejected", http_status=400, hint=HINT))
+    assert got["details"] == {"http_status": 400, "hint": HINT}
     got = _valid(build_error("network_error", tls=True, timeout=False))
     assert got["details"] == {"tls": True, "timeout": False}
     assert _valid(build_error("usage"))["details"] is None
@@ -212,7 +213,7 @@ def test_details_by_code() -> None:
 
 
 def test_details_key_order_follows_the_interface() -> None:
-    got = _valid(build_error("host_rejected", http_status=400, hint="h"))["details"]
+    got = _valid(build_error("host_rejected", http_status=400, hint=HINT))["details"]
     assert list(got) == ["http_status", "hint"]
     got = _valid(build_error("network_error", timeout=True, tls=False))["details"]
     assert list(got) == ["tls", "timeout"]
@@ -307,7 +308,16 @@ def test_a_file_path_key_is_kept_but_bounded_and_the_envelope_stays_valid() -> N
     over = _valid(build_error("config_invalid", key="/" + "p" * 5000))
     assert over["details"] == {"key": "?"}
     nasty = _valid(build_error("config_invalid", key='/a\nb"\\\ud800‮'))
-    assert nasty["details"]["key"].startswith("/a")
+    assert nasty["details"]["key"] == "?"
+
+
+@pytest.mark.parametrize("key", ["a\u2028b", "a\u2029b", "a\x85b", "a\x00b", "a\nb", "a\x1bb"])
+def test_a_key_with_a_non_printable_character_is_question_mark(
+    key: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _valid(build_error("config_invalid", key=key))["details"] == {"key": "?"}
+    fail(True, "config_invalid", key=key)
+    assert len(capsys.readouterr().out.splitlines()) == 1
 
 
 def test_a_nasty_key_prints_as_one_line_of_valid_json(
@@ -359,6 +369,8 @@ def test_the_envelope_never_contains_what_the_caller_cannot_pass() -> None:
             kwargs["env"] = "HA_TOKEN"
         if code in RESPONSE_CODES or code == "wrong_host_response":
             kwargs["http_status"] = 500
+        if code == "host_rejected":
+            kwargs.update(http_status=400, hint=HINT)
         if code == "rate_limited":
             kwargs["retry_after_s"] = 2
         if code == "network_error":
@@ -397,11 +409,13 @@ def test_fail_returns_the_exit_code_of_the_code() -> None:
     assert fail(False, "internal") == 1
 
 
-def test_emit_error_takes_a_result_or_an_envelope(capsys: pytest.CaptureFixture[str]) -> None:
-    emit_error(True, cli.error_envelope("usage", "m"))
+def test_emit_error_takes_only_a_built_result(capsys: pytest.CaptureFixture[str]) -> None:
     emit_error(True, build_error("outcome_unknown"))
     lines = capsys.readouterr().out.splitlines()
-    assert [json.loads(x)["error"]["code"] for x in lines] == ["usage", "outcome_unknown"]
+    assert [json.loads(x)["error"]["code"] for x in lines] == ["outcome_unknown"]
+    with pytest.raises(TypeError):
+        emit_error(True, {"error": {"code": "x", "message": "m"}})  # type: ignore[arg-type]
+    assert not hasattr(output, "error_envelope") and not hasattr(cli, "error_envelope")
 
 
 def test_disabled_with_json(capsys: pytest.CaptureFixture[str]) -> None:
@@ -437,7 +451,7 @@ def test_stdout_is_written_and_flushed_before_stderr(monkeypatch: pytest.MonkeyP
     log: list[str] = []
     monkeypatch.setattr(sys, "stdout", _Recorder("out", log))
     monkeypatch.setattr(sys, "stderr", _Recorder("err", log))
-    fail(True, "usage", message="m")
+    fail(True, "usage", message="no command given")
     assert log.index("out.flush") < log.index("err.write")
     assert [e for e in log if e.endswith(".write")] == ["out.write", "err.write"]
 
@@ -576,10 +590,57 @@ def test_a_failure_while_reporting_still_exits_1(run: Any, monkeypatch: pytest.M
 def test_a_handler_that_returns_a_bad_exit_code_is_internal(
     run: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    for value in (None, "0", True, -1, 256, 3.0):
+    for value in (None, "0", True, -1, 256, 3.0, 3, 130, 143, 255, 10, 21):
         monkeypatch.setitem(cli.HANDLERS, "send", lambda inv, v=value: v)
         code, out, err = run(["send", "--message=a"])
         assert code == 1 and err == "internal: internal error\n", value
+
+
+@pytest.mark.parametrize("value", [0, 1, 2, 12, 20, 22])
+def test_a_handler_may_return_the_documented_codes_only_those(
+    run: Any, monkeypatch: pytest.MonkeyPatch, value: int
+) -> None:
+    monkeypatch.setitem(cli.HANDLERS, "send", lambda inv: value)
+    assert run(["send", "--message=a"])[0] == value
+
+
+def test_a_handler_that_emits_then_raises_gives_one_envelope(
+    run: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(inv: cli.Invocation) -> int:
+        fail(inv.json, "refused", reason="empty_message")
+        raise _Boom(SECRET)
+
+    monkeypatch.setitem(cli.HANDLERS, "send", handler)
+    code, out, err = run(["--json", "send", "--message=a"])
+    assert code == 20 and len(out.splitlines()) == 1
+    assert json.loads(out)["error"]["code"] == "refused"
+    assert err.count("\n") == 1 and SECRET not in out + err
+
+
+def test_a_handler_that_emits_then_returns_garbage_gives_one_envelope(
+    run: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(inv: cli.Invocation) -> Any:
+        fail(inv.json, "credential_invalid", env="HA_X")
+        return 99
+
+    monkeypatch.setitem(cli.HANDLERS, "send", handler)
+    code, out, _ = run(["--json", "send", "--message=a"])
+    assert code == 12 and len(out.splitlines()) == 1
+
+
+def test_the_emitted_state_does_not_leak_into_the_next_invocation(
+    run: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def first(inv: cli.Invocation) -> int:
+        return fail(inv.json, "refused", reason="empty_message")
+
+    monkeypatch.setitem(cli.HANDLERS, "send", first)
+    assert run(["--json", "send", "--message=a"])[0] == 20
+    monkeypatch.setitem(cli.HANDLERS, "send", _boom)
+    code, out, err = run(["--json", "send", "--message=a"])
+    _assert_internal(code, out, err, unknown=False, json_mode=True)
 
 
 def test_help_and_version_are_not_internal_errors(run: Any) -> None:
@@ -689,3 +750,96 @@ def test_real_process_exit_1_with_closed_standard_streams(tmp_path: Path) -> Non
         env=_env(tmp_path),
     )
     assert proc.returncode == 1
+
+
+# --- review round 1 ------------------------------------------------------------------------
+
+
+def test_unavailable_rejects_any_phase_but_input() -> None:
+    assert _valid(build_error("unavailable", phase="input"))["details"] == {"phase": "input"}
+    for bad in ("x", "", None, "idle"):
+        with pytest.raises(ValueError):
+            build_error("unavailable", phase=bad)
+    with pytest.raises(ValueError):
+        build_error("network_error", phase="input", tls=False, timeout=False)
+
+
+class _Status(int):
+    pass
+
+
+class _Enum(__import__("enum").IntEnum):
+    UNAUTH = 401
+
+
+def test_http_status_accepts_int_subclasses_but_not_bool() -> None:
+    for value in (_Status(401), _Enum.UNAUTH):
+        error = _valid(build_error("auth_required", http_status=value))
+        assert error["details"] == {"http_status": 401}
+        assert type(error["details"]["http_status"]) is int
+        assert output.dumps({"v": error["details"]["http_status"]}) == '{"v":401}'
+    with pytest.raises(ValueError):
+        build_error("auth_required", http_status=True)
+
+
+def test_a_huge_retry_after_is_a_value_error_not_an_overflow() -> None:
+    with pytest.raises(ValueError):
+        build_error("rate_limited", http_status=429, retry_after_s=10**400)
+
+
+@pytest.mark.parametrize("bad", ["a perfectly clean line", "usage", "internal error"])
+def test_a_message_override_must_be_from_the_closed_set(bad: str) -> None:
+    with pytest.raises(ValueError):
+        build_error("usage", message=bad)
+
+
+def test_every_usage_message_in_cli_is_an_allowed_override() -> None:
+    import re
+
+    source = Path(cli.__file__).read_text(encoding="utf-8")
+    literals = set(re.findall(r'UsageError\("([^"]+)"\)', source))
+    assert literals and literals <= output.OVERRIDE_MESSAGES
+    for text in literals | {"command not implemented"}:
+        assert build_error("usage", message=text).envelope["error"]["message"] == text
+
+
+def test_host_rejected_needs_the_fixed_hint_and_status_400() -> None:
+    assert _valid(build_error("host_rejected", http_status=400, hint=HINT))
+    cases: list[dict[str, Any]] = [
+        {"http_status": 400},
+        {"http_status": 400, "hint": "check the service"},
+        {"http_status": 401, "hint": HINT},
+    ]
+    for kwargs in cases:
+        with pytest.raises(ValueError):
+            build_error("host_rejected", **kwargs)
+
+
+def test_every_accepted_cell_validates_against_the_error_schema() -> None:
+    import itertools
+
+    base: dict[str, list[dict[str, Any]]] = {
+        "usage": [{}],
+        "config_invalid": [{"key": "base_url"}, {"key": "?"}, {"key": "/p/c.yaml"}],
+        "internal": [{}, {"after_writing": True}],
+        "refused": [{"reason": "invalid_payload", "pointer": p} for p in ("", "/message", "/?")]
+        + [{"reason": "link_invalid", "pointer": "/link"}]
+        + [{"reason": r} for r in ("empty_message", "command_keyword", "link_scheme")],
+        "host_rejected": [{"http_status": 400, "hint": HINT}],
+        "auth_required": [{"http_status": s} for s in (401, 403)],
+        "credential_invalid": [{"env": "HA_TOKEN"}],
+        "rate_limited": [{"http_status": 429, "retry_after_s": r} for r in (0, 2, 4.5)],
+        "upstream_error": [{"http_status": s} for s in (500, 502, 599)],
+        "network_error": [{"tls": t, "timeout": o} for t in (True, False) for o in (True, False)],
+        "outcome_unknown": [{}],
+        "wrong_host_response": [{"http_status": s} for s in (100, 200, 204, 302, 404, 599)],
+        "unavailable": [{}, {"phase": "input"}],
+    }
+    assert set(base) == set(output.EXIT_CODES)
+    accepted = 0
+    for code, cells in base.items():
+        for details, tag in itertools.product(cells, (False, True)):
+            result = build_error(code, tag_sent=tag, **details)
+            assert schema_errors("cli/error", result.envelope) == [], (code, details)
+            accepted += 1
+    assert accepted > 40

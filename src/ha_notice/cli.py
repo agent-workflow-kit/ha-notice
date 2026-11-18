@@ -29,16 +29,22 @@ from typing import Any
 from ha_notice import __version__
 from ha_notice.gateway import Gateway, RealGateway
 from ha_notice.output import (
+    EXIT_DISABLED,
+    EXIT_FAILED,
     EXIT_INTERNAL,
+    EXIT_OK,
+    EXIT_REFUSED,
+    EXIT_USAGE,
     dumps,
     emit_error,
-    error_envelope,
+    emitted_exit,
     fail,
     flush_streams,
+    reset_emitted,
     write_text,
 )
 
-__all__ = ["dumps", "emit_error", "error_envelope", "write_text"]  # re-exported (see output.py)
+__all__ = ["dumps", "emit_error", "write_text"]  # re-exported (see output.py)
 
 # interface.md, send: the whole string must match (re.fullmatch, never re.match or a `$`).
 ACTOR_RE = re.compile(r"(?:human|auto):[A-Za-z0-9._@/-]{1,64}")
@@ -407,6 +413,12 @@ def _validate(inv: Invocation) -> int:
 HANDLERS: dict[str, Callable[[Invocation], int]] = {"send": _send, "validate": _validate}
 
 
+# Exit codes a handler may return (docs/interface.md, Exit codes); 128+N is #26's.
+HANDLER_EXIT_CODES = frozenset(
+    {EXIT_OK, EXIT_INTERNAL, EXIT_USAGE, EXIT_FAILED, EXIT_REFUSED, EXIT_DISABLED}
+)
+
+
 def _run(args: list[str], environment: Mapping[str, str], gw: Gateway) -> int:
     try:
         inv = parse(args, environment, gw)
@@ -418,9 +430,14 @@ def _run(args: list[str], environment: Mapping[str, str], gw: Gateway) -> int:
         return fail(wants_json(args), "internal")
     try:
         code = HANDLERS[inv.command](inv)
-        if type(code) is not int or not 0 <= code <= 255:
+        if type(code) is not int or code not in HANDLER_EXIT_CODES:
             raise ValueError("a handler returned something that is not an exit code")
     except Exception:  # noqa: BLE001 - the class and text of the exception are never printed
+        # TODO(#26): BaseException (SystemExit, KeyboardInterrupt) is not caught here; #26 owns
+        # it with the signal handling (exit 128+N, no envelope; the SystemExit text is not printed).
+        done = emitted_exit()
+        if done is not None:  # one envelope per run: the handler already printed its own
+            return done
         return fail(inv.json, "internal", after_writing=inv.progress.writing)
     return code
 
@@ -438,6 +455,7 @@ def main(
     carry the fixed message only, never the exception's class or text, so that nothing that was
     read (input, config, credential) can leak. If even printing that fails, the exit code is
     still 1 (the envelope on exit 1 is best effort). Both streams get one last flush attempt."""
+    reset_emitted()
     try:
         args = sys.argv[1:] if argv is None else list(argv)
         environment = dict(os.environ) if env is None else env
