@@ -272,8 +272,6 @@ HOSTILE = [
 
 @pytest.mark.parametrize("field", HOSTILE)
 def test_a_hostile_field_name_as_a_pointer_is_question_mark(field: str) -> None:
-    if field and field.isascii() and all(c.isalnum() or c in "_-" for c in field) and len(field) <= 64:
-        pytest.skip("not hostile")
     assert safe_pointer(field) == "/?"
     error = _valid(build_error("refused", reason="invalid_payload", pointer=safe_pointer(field)))
     assert error["details"] == {"pointer": "/?"}
@@ -308,7 +306,7 @@ def test_a_file_path_key_is_kept_but_bounded_and_the_envelope_stays_valid() -> N
     assert _valid(build_error("config_invalid", key=path))["details"] == {"key": path}
     over = _valid(build_error("config_invalid", key="/" + "p" * 5000))
     assert over["details"] == {"key": "?"}
-    nasty = _valid(build_error("config_invalid", key="/a\nb\"\\\ud800‮"))
+    nasty = _valid(build_error("config_invalid", key='/a\nb"\\\ud800‮'))
     assert nasty["details"]["key"].startswith("/a")
 
 
@@ -336,14 +334,14 @@ def test_messages_cover_every_code_and_reason() -> None:
     from tests.harness import load_schema
 
     defs = load_schema("defs")["$defs"]
-    assert set(output.MESSAGES) == set(defs["error_code"]["enum"]) - {"refused", "usage"} | {
-        "usage"
-    }
+    assert set(output.MESSAGES) == set(defs["error_code"]["enum"]) - {"refused"}
     assert set(output.REASON_MESSAGES) == set(defs["refusal_reason"]["enum"])
     assert set(output.EXIT_CODES) == set(defs["error_code"]["enum"])
 
 
-@pytest.mark.parametrize("bad", ["a\nb", "a\rb", "", "x" * 2049, "a b", "a\x00b", "a\x1b[0m"])
+@pytest.mark.parametrize(
+    "bad", ["a\nb", "a\rb", "", "x" * 2049, "a\x00b", "a\x1b[0m", "a\u2028b", "a\x85b"]
+)
 def test_a_message_override_must_be_one_clean_line(bad: str) -> None:
     with pytest.raises(ValueError):
         build_error("usage", message=bad)
@@ -568,9 +566,7 @@ def test_an_exception_in_the_parse_without_json_prints_the_line_only(run: Any) -
     _assert_internal(*run(["validate"], gateway), unknown=False, json_mode=False)
 
 
-def test_a_failure_while_reporting_still_exits_1(
-    run: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_failure_while_reporting_still_exits_1(run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(cli.HANDLERS, "send", _boom)
     monkeypatch.setattr(cli, "fail", _boom)
     code, out, err = run(["send", "--message=a"])
@@ -609,7 +605,10 @@ def _golden_text(result: ErrorResult) -> str:
 @pytest.mark.parametrize(
     ("name", "result"),
     [
-        ("error-refused-invalid-payload.json", ("refused", {"reason": "invalid_payload", "pointer": "/?"})),
+        (
+            "error-refused-invalid-payload.json",
+            ("refused", {"reason": "invalid_payload", "pointer": "/?"}),
+        ),
         ("error-rate-limited.json", ("rate_limited", {"http_status": 429, "retry_after_s": 4})),
         ("error-outcome-unknown-tagged.json", ("outcome_unknown", {"tag_sent": True})),
         ("error-config-invalid-key.json", ("config_invalid", {"key": "?"})),
@@ -672,7 +671,9 @@ def test_real_process_exit_1_with_a_closed_pipe_keeps_the_exit_code(tmp_path: Pa
     read_end, write_end = os.pipe()
     os.close(read_end)
     try:
-        proc = _proc(tmp_path, ["--json", "send", "--message=a"], stdout=write_end, stderr=write_end)
+        proc = _proc(
+            tmp_path, ["--json", "send", "--message=a"], stdout=write_end, stderr=write_end
+        )
     finally:
         os.close(write_end)
     assert proc.returncode == 1
