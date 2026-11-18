@@ -14,7 +14,7 @@ ha-notice is a small command line tool for scripts, cron jobs and hooks. It take
 
 ## Installation
 
-You need Python 3.12 or newer and Linux or WSL (macOS is expected to work). The tool depends only on the standard library, Pydantic and PyYAML.
+You need Python 3.12 or newer and Linux or WSL (macOS is expected to work). The tool depends only on the standard library and PyYAML.
 
 With [uv](https://docs.astral.sh/uv/):
 
@@ -33,16 +33,16 @@ To pin a release, append `@v<version>` (a tag from the repository's releases) to
 ## Quick start
 
 1. Create a long-lived access token. In Home Assistant open your profile (your user name at the bottom of the sidebar), choose the Security tab, scroll to Long-lived access tokens and create one. A dedicated Home Assistant user for notifications limits what a leaked token can do, because the token is valid for the whole Home Assistant API.
-2. Put the token in an environment variable. The variable's name is set by `token_env` in the config (default `HA_TOKEN`) and must match `HA_[A-Z0-9_]{1,60}` as a whole, so a config cannot name another secret. For a shell session: `export HA_TOKEN=...`. The token is read only from this variable, never from argv, a config file or a prompt. For cron and hooks see [Calling from automation](#calling-from-automation).
-3. Find the service name. In Home Assistant open Developer tools, then Actions (older versions call it Services), and search for `notify.`. A phone running the companion app is a service named `notify.mobile_app_<device>`; the config key `service` is the part after `notify.`.
-4. Write the config at `~/.config/ha-notice/config.yaml`. Only two keys are required:
+2. Put the token in an environment variable. The variable's name is set by `token_env` in the config (default `HA_TOKEN`) and must match `HA_[A-Z0-9_]{1,60}` as a whole, so a config cannot name another secret. For a shell session: `export HA_TOKEN=...`. The token is read only from this variable, never from argv, a config file or a prompt, so do not put it in the config or on a command line that your shell history records; read it from a mode-0600 file or a secret manager instead. Cron and hook guidance (an env file sourced by the cron line) is pending in [#33](https://github.com/agent-workflow-kit/ha-notice/issues/33); until then see [Calling from automation](#calling-from-automation).
+3. Find the service name. This needs a Home Assistant administrator, because Developer tools is admin only; if the dedicated user is not an administrator, ask one or look it up with your own account. Open Developer tools, then Actions (older versions call it Services), and search for `notify.`. A phone running the companion app is a service named `notify.mobile_app_<device>`; the config key `service` is the part after `notify.`.
+4. Write the config at `.config/ha-notice/config.yaml` under the account's home directory. Only two keys are required:
 
    ```yaml
    base_url: https://homeassistant.example:8123
    service: mobile_app_your_phone
    ```
 
-   The directory is found from the home directory in the password database. The `HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` variables are not read, and a failed lookup is exit 2 `config_invalid` (key `home`). Use `--config <path>` to read another file. All keys are listed in [Configuration](#configuration).
+   The home directory is the one in the password database, which `~` may not match. The `HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` variables are not read, and a failed lookup is exit 2 `config_invalid` (key `home`). Use `--config <path>` to read another file. All keys are listed in [Configuration](#configuration).
 5. Check the setup with `ha-notice validate --probe`, then send a first notification:
 
    ```sh
@@ -139,7 +139,7 @@ credential: failed: credential_invalid: the token variable (HA_TOKEN) is missing
 - `validate --probe` also makes one read-only call, `GET /api/`, to check the host and the token. It sends no notification. A 401 or 403 reports `auth_required`; a 404 or 405 means `base_url` or its path prefix is probably wrong; a certificate failure points at `ca_file`.
 - `validate --test-message` sends a REAL notification (level `info`, title `ha-notice`, message `validate: test message`) and adds a `test_message` check. Look at your phone: delivery is not observable, so the check can only say that Home Assistant accepted the request. It is logged like a send. When it fails, the message does not name the code (it is in the log record unless `log` is false), and any non-zero exit means "look at the destination". It is for a human to run once by hand and is not for automation.
 - `--dry-run` has no effect on `validate`: `validate --dry-run --test-message` still sends.
-- With `enabled: false`, plain `validate` exits 0 and reports `enabled: false` (or exits 12 with a broken credential). `--probe` and `--test-message` make no call, print `{"outcome":"disabled"}` and exit 22.
+- With `enabled: false`, plain `validate` exits 0 and reports `enabled: false` (or exits 12 with a broken credential). `--probe` and `--test-message` make no call and exit 22, printing `{"outcome":"disabled"}` on stdout with `--json` and otherwise `disabled in config` on stderr.
 
 | `validate` exit | Meaning |
 |---|---|
@@ -221,7 +221,7 @@ To send to several destinations, keep one config file per destination and pass `
 
 ## Logs and state
 
-Every send that gets past input validation appends one record to `log.jsonl` in the state directory, `.local/state/ha-notice` under the same password-database home (created with mode 0700; `XDG_STATE_HOME` is not read). It holds hashes, counts, the outcome and the exit code, never a title, message, link, host, service or credential. The log rotates at 1 MiB and keeps three older files. Dry runs, usage errors, disabled runs, signals and `validate` (except `--test-message`) are not logged. A state directory that cannot be used only prints `warning: log record skipped (state directory unusable)` and never changes the exit code. Set `log: false` to write nothing. See [Log](docs/interface.md#log).
+Every outcome that reaches step 3 (input reading) or later appends one record to `log.jsonl`, whether it was sent, refused (exit 20), failed or `outcome_unknown`, including an input timeout (`unavailable`); an exit 1 is logged only if the request may already have been sent in the state directory, `.local/state/ha-notice` under the same password-database home (created with mode 0700; `XDG_STATE_HOME` is not read). It holds hashes, counts, the outcome and the exit code, never a title, message, link, host, service or credential. The log rotates at 1 MiB and keeps three older files. Not logged: exit 2, exit 22 (disabled), signals, dry runs, `validate` (except `--test-message`) and an exit 1 before the request started. `message_sha256` is a 64-bit unsalted hash, so a reader of the log file (mode 0600) can confirm a short message by hashing a guess. A state directory that cannot be used only prints `warning: log record skipped (state directory unusable)` and never changes the exit code. Set `log: false` to write nothing. See [Log](docs/interface.md#log).
 
 ## Exit codes
 
@@ -251,17 +251,19 @@ Only `code` and `message` are always meaningful; the other keys are null when th
 
 ## Calling from automation
 
-Cron jobs, hooks and scripts call `ha-notice send --stdin-json --json --actor auto:<name>` with the payload on stdin, and decide by exit code: treat 22 as success, never retry 20, retry only a 12 whose `retryable` is true, and wait at least `timeout` plus 10 s before killing the tool. The full rules for callers are in [Calling from automation](docs/interface.md#calling-from-automation). Cron examples and token env-file guidance are being written up in a later README revision; until then use the interface document. Automation must not call `validate --test-message`.
+Cron jobs, hooks and scripts call `ha-notice send --stdin-json --json --actor auto:<name>` with the payload on stdin, and decide by exit code: treat 22 as success, never retry 20, retry only exit 12 with `retryable` true (with your own backoff and a cap; when `unknown_outcome` is also true, only if you passed `--dedupe-key` and no newer notification with that key has been sent), treat an exit 1 without an envelope as outcome unknown, and wait at least `timeout` plus 10 s before killing the tool. The full rules for callers are in [Calling from automation](docs/interface.md#calling-from-automation). Cron examples and token env-file guidance are tracked in [#33](https://github.com/agent-workflow-kit/ha-notice/issues/33) and will be added to this README; until then use the interface document. Automation must not call `validate --test-message`.
+
+<!-- TODO(#33): cron example, mode-0600 token env file, kill timeout >= timeout+10 s, rc handling for exit 22 -->
 
 ## Signals and timing
 
-`timeout` (default 10 s) is one deadline for the whole send: reading input, connecting, the request and retries. The tool ends within `timeout` plus 3 s. SIGINT, SIGTERM and SIGHUP before the send starts exit 128+N and send nothing; during the send they act like the deadline. SIGTERM is the preferred way for a caller to stop the tool. A 429 answer is retried up to twice (after 2 s and 4 s) and a connection failure once, all inside the deadline. See [Deadline](docs/interface.md#home-assistant-edge).
+`timeout` (default 10 s) is one deadline for the whole send: reading input, connecting, the request and retries. The tool ends within `timeout` plus 3 s. SIGINT, SIGTERM and SIGHUP before the send starts exit 128+N and send nothing; during the send they act like the deadline. SIGTERM is the preferred way for a caller to stop the tool. A 429 answer is retried up to twice (after 2 s and 4 s) and a connection failure once, all inside the deadline; these are the tool's own retries, and a caller's retry rule is under [Calling from automation](#calling-from-automation). See [Deadline](docs/interface.md#home-assistant-edge).
 
 ## Security notes
 
 - The token is read only from the variable named by `token_env`, which must start with `HA_`. It is sent only as an `Authorization: Bearer` header, and never appears in argv, URLs, logs, output or errors.
 - The connection uses `https` with certificate and host name checks and TLS 1.2 or newer. An `http://` `base_url` is refused unless `allow_insecure_http: true`; then the token travels in cleartext and every run that makes a request warns on stderr (`--quiet` does not hide it). There is no switch that turns certificate checks off.
-- For a private certificate authority or a self-signed server, set `ca_file` to an absolute path of a PEM bundle of at most 4 MiB; it is added to the system trust.
+- For a private certificate authority or a self-signed server, set `ca_file` to an absolute path of a PEM bundle of at most 4 MiB; it is added to the system trust, or used alone when the default trust is empty.
 - Proxy variables and `SSL_CERT_FILE` are ignored, redirects are never followed, and the tool runs no subprocess.
 - Untrusted text travels only on stdin or in a file, never in argv or the environment. Flag text is for humans.
 - A message that is only a companion-app command word (for example `clear_notification`) is refused with `command_keyword`. Prefix the text with its source and a colon, or write a sentence.
@@ -271,7 +273,14 @@ Cron jobs, hooks and scripts call `ha-notice send --stdin-json --json --actor au
 The complete list is [Residual risks](docs/interface.md#residual-risks). In short:
 
 - No delivery confirmation: success is returned whether or not the push reaches the phone.
-- The token is a long-lived credential valid for the whole Home Assistant API; use a dedicated user. Whoever can edit your config can send the token anywhere, since `base_url` and `--config` choose the destination.
+- The token is a long-lived credential valid for the whole Home Assistant API; use a dedicated user. Whoever can edit your config can send the token anywhere, since `base_url` and `--config` choose the destination; the config is trusted (same-user boundary), and the state directory is checked but the config is not.
+- The environment is trusted: `PYTHONPATH`, `LD_PRELOAD` and `OPENSSL_CONF` run code in the tool with the token in reach, so a caller that can set the process environment is inside the trust boundary.
+- Errors are opaque: several different mistakes return the same 400, so diagnose with `validate --test-message` and check `service`.
+- `message_sha256` in the log is a 64-bit unsalted hash, so a reader of the log file can confirm a short message.
+- The command-word rule is a guess at the apps' matching and is over-broad: a legitimate message that equals a keyword or starts `command_` or `kiosk_` is refused, so the caller prefixes the text with its source and a colon.
+- The tool does not escape template syntax. A caller that sends untrusted text to a Home Assistant service that renders templates takes that risk.
+- The message may be cut or dropped on the phone; the display limit is unknown, and the defaults of 1000 characters and 2000 bytes are conservative.
+- With `allow_insecure_http` the token travels in cleartext, and a self-signed server is trusted only through `ca_file`; see [Security notes](#security-notes).
 - Home Assistant was observed not to render templates in REST-supplied text; this is tested, not guaranteed.
 - The Android app may render a small HTML subset in the message (unverified), so a producer may be able to style or mislabel text.
 - With `link_hosts` unset, a producer can aim the tap target at any web address.
