@@ -339,6 +339,8 @@ def _expected_removed(n: int) -> bool:
 
 
 def test_cn_follows_the_running_python() -> None:
+    # Category-equivalence check against the running Python's tables, not a golden list: the
+    # fixed REMOVED and KEPT lists above are the golden pins.
     # Every code point, one text: a removed one disappears, any other stays (except the breaks,
     # the tab and the whitespace that the later steps strip at the ends, so each is flanked).
     bad: list[int] = []
