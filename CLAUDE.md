@@ -19,7 +19,7 @@ ha-notice is an awkit L1 primitive: send one notification through the Home Assis
 - Interface first: interface changes update `docs/interface.md`, `schemas/` and `../awkit-docs/interface-registry.md` together.
 - Semver. A breaking interface change is, before 1.0, a `feat` commit whose title names the break (never `!` before 1.0), and from 1.0 on a `!` commit; the title becomes the changelog line (details go in the PR body). Either way, update `awkit-docs/interface-registry.md`. Never hand-edit CHANGELOG.md or the version.
 - Run `make verify` before every commit.
-- All subprocess and HTTP calls go through `src/ha_notice/gateway.py`.
+- All HTTP, clock, name-resolution, home and state-directory access goes through `src/ha_notice/gateway.py`; the tool never runs a subprocess.
 - Untrusted text travels only in files or stdin, never argv or env.
 - The token is read only from the variable named by `token_env` (it must start with `HA_`) and never appears in argv, URLs, logs, output or errors. There are no `HA_NOTICE_*` environment overrides. The config and state directory are found from the password-database home; `HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are not read. A failed home lookup is exit 2 `config_invalid` (key `home`); there is no fallback.
 - HTTP uses `http.client` with its own TLS context: no proxies, no redirects, no `urllib`, `SSL_CERT_FILE` ignored.
