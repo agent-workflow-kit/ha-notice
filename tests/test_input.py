@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import resource
 import socket
 import stat
 import subprocess
@@ -397,9 +399,12 @@ def test_directory_fifo_and_dev_zero_are_source_errors(
 
 
 def test_closed_descriptor_is_empty_input(real: gw.RealGateway) -> None:
-    # A descriptor number that is certainly closed: a high number dup'd onto a pipe, then closed.
+    # A descriptor number that is certainly closed: a high number (below the soft fd limit)
+    # dup'd onto a pipe, then closed.
+    soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    target = 900 if soft == resource.RLIM_INFINITY else min(900, soft - 1)
     r, w = os.pipe()
-    high = os.dup2(r, 900)
+    high = fcntl.fcntl(r, fcntl.F_DUPFD, target)
     os.close(r)
     os.close(w)
     os.close(high)
