@@ -1,5 +1,9 @@
 """Gateway: the single boundary for subprocess and HTTP calls.
 
+TODO(#3): this template stub is rewritten there. The gateway covers HTTP, the clock, name
+resolution, home_dir/uid, read_source and state directory access (docs/plan.md, docs/design.md);
+it runs no subprocess.
+
 Every call this tool makes to an external program (and, later, over HTTP) goes through this
 module so that tests can substitute fakes (fake binaries in ``tests/fakebin/`` or a patched
 function). Commands are always run as argv lists, never through a shell, and untrusted text is

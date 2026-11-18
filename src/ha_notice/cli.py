@@ -11,6 +11,7 @@ from ha_notice import __version__
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ha-notice",
+        allow_abbrev=False,
         description="Send a notification through the Home Assistant REST notify service.",
     )
     parser.add_argument("--version", action="version", version=f"ha-notice {__version__}")

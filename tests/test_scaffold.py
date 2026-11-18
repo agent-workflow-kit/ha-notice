@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import importlib.metadata
 import subprocess
 import sys
 import tomllib
@@ -65,8 +66,8 @@ def test_runtime_dependencies_are_only_pydantic_and_pyyaml() -> None:
         assert name.lower() in allowed, dep
 
 
-def test_source_never_imports_urllib_or_a_third_party_http_library() -> None:
-    banned = {"urllib", "urllib3", "requests", "httpx", "aiohttp", "httplib2", "pycurl"}
+def test_source_imports_only_stdlib_and_allowed_dependencies() -> None:
+    allowed = {"ha_notice", "pydantic", "yaml"}
     for path in (ROOT / "src" / "ha_notice").glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Import):
@@ -75,7 +76,26 @@ def test_source_never_imports_urllib_or_a_third_party_http_library() -> None:
                 roots = {node.module.split(".")[0]}
             else:
                 continue
-            assert not roots & banned, f"{path.name} imports {roots & banned}"
+            assert "urllib" not in roots, f"{path.name} imports urllib"
+            unexpected = roots - allowed - set(sys.stdlib_module_names)
+            assert not unexpected, f"{path.name} imports {unexpected}"
+
+
+def test_version_falls_back_when_the_package_is_not_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(importlib.metadata, "version", missing)
+        try:
+            importlib.reload(ha_notice)
+            assert ha_notice.__version__ == "0.0.0+unknown"
+        finally:
+            patch.undo()
+            importlib.reload(ha_notice)
+    assert ha_notice.__version__ == PYPROJECT["project"]["version"]
 
 
 def test_live_marker_is_excluded_by_default() -> None:
