@@ -109,6 +109,26 @@ def test_a_golden_that_breaks_its_schema_is_reported() -> None:
     assert any("not JSON" in p for p in gc.problems(bad))
 
 
+def test_a_request_golden_that_breaks_the_rendered_schema_is_reported() -> None:
+    bad = copy.deepcopy(LISTING)
+    name = next(iter(bad["request"]))
+    doc = json.loads(bad["request"][name])
+    doc["unexpected"] = 1
+    bad["request"][name] = json.dumps(doc)
+    assert any(p.startswith(f"request/{name}") for p in gc.problems(bad))
+    del doc["unexpected"]
+    del doc["message"]
+    bad["request"][name] = json.dumps(doc)
+    assert any(p.startswith(f"request/{name}") for p in gc.problems(bad))
+
+
+@pytest.mark.parametrize(("prefix", "level"), [("WARN:", "warn"), ("ACTION:", "action")])
+def test_a_title_that_is_only_a_level_prefix_is_that_level(prefix: str, level: str) -> None:
+    text = json.dumps({"title": prefix, "message": "m"})
+    assert gc.covered({"request": {"x.json": text}}) >= {f"request:level:{level}"}
+    assert "request:level:info" not in gc.covered({"request": {"x.json": text}})
+
+
 def test_an_allowlisted_item_is_required_and_never_covered() -> None:
     assert set(gc.NON_GOLDENABLE) <= gc.required()
     assert not set(gc.NON_GOLDENABLE) & gc.covered(LISTING)

@@ -87,6 +87,12 @@ def validator(name: str, definition: str | None = None) -> Draft202012Validator:
     return Draft202012Validator(ref, registry=_registry())
 
 
+def fragment_validator(name: str, pointer: str) -> Draft202012Validator:
+    """A validator for the part of a schema at a JSON pointer such as `/properties/rendered`."""
+    ref = {"$ref": f"{load_schema(name)['$id']}#{pointer}"}
+    return Draft202012Validator(ref, registry=_registry())
+
+
 def schema_errors(name: str, instance: Any, definition: str | None = None) -> list[ValidationError]:
     return list(validator(name, definition).iter_errors(instance))
 

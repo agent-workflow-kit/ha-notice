@@ -185,6 +185,24 @@
           },
           "reason": {
             "$ref": "defs.json#/$defs/refusal_reason"
+          },
+          "level": {
+            "type": "null"
+          },
+          "bytes": {
+            "type": "null"
+          },
+          "truncated": {
+            "type": "null"
+          },
+          "message_sha256": {
+            "type": "null"
+          },
+          "dedupe_key_sha256": {
+            "type": "null"
+          },
+          "tag_set": {
+            "type": "null"
           }
         }
       }

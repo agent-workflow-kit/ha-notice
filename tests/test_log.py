@@ -84,6 +84,16 @@ def sdir(home: Path) -> Path:
     return d
 
 
+REFUSED_NULL_FIELDS = (
+    "level",
+    "bytes",
+    "truncated",
+    "message_sha256",
+    "dedupe_key_sha256",
+    "tag_set",
+)
+
+
 def facts(**kw: Any) -> RunFacts:
     base: dict[str, Any] = {
         "exit_code": 0,
@@ -101,6 +111,9 @@ def facts(**kw: Any) -> RunFacts:
         "actor": "auto:cron",
         "actor_source": "default",
     }
+    if kw.get("exit_code") == 20:
+        # docs/interface.md, Log: a refusal never built a request, so these are null.
+        base.update(dict.fromkeys(REFUSED_NULL_FIELDS))
     base.update(kw)
     return RunFacts(**base)
 

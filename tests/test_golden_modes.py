@@ -56,6 +56,8 @@ class Scenario:
     scripts: tuple[ConnectionScript, ...] = ()  # one per connection, then the default
     prep: Prep = _noop
     log: str | None = None
+    # True when the run legitimately writes a log record that has no golden of its own here.
+    logs_unchecked: bool = False
     request: str | None = None
 
 
@@ -85,6 +87,7 @@ SEND: tuple[Scenario, ...] = (
         0,
         "cli/send",
         "send-sent-truncated.json",
+        log="send-sent-truncated.jsonl",
         argv=("--message=" + "a" * 1100,),
         request="message_cut.json",
     ),
@@ -94,6 +97,7 @@ SEND: tuple[Scenario, ...] = (
         "cli/send",
         "send-sent-insecure.json",
         config="base_url: http://ha.example\nservice: s\nallow_insecure_http: true\n",
+        logs_unchecked=True,
     ),
     Scenario(
         "dry-run",
@@ -212,13 +216,21 @@ SEND: tuple[Scenario, ...] = (
         scripts=(ConnectionScript(connect_error=ConnectionRefusedError(111, "x")),) * 2,
         log="send-network-error.jsonl",
     ),
-    Scenario("network-error-tls", 12, "cli/error", "error-network-error-tls.json", prep=_no_trust),
+    Scenario(
+        "network-error-tls",
+        12,
+        "cli/error",
+        "error-network-error-tls.json",
+        prep=_no_trust,
+        logs_unchecked=True,
+    ),
     Scenario(
         "network-error-timeout",
         12,
         "cli/error",
         "error-network-error-timeout.json",
         scripts=(ConnectionScript(connect_error=TimeoutError("x")),) * 2,
+        logs_unchecked=True,
     ),
     Scenario(
         "outcome-unknown-tagged",
@@ -227,6 +239,7 @@ SEND: tuple[Scenario, ...] = (
         "error-outcome-unknown-tagged.json",
         argv=("--message=hi", "--dedupe-key=k1"),
         scripts=(ConnectionScript(response_error=ConnectionResetError(104, "x")),),
+        logs_unchecked=True,
     ),
     Scenario(
         "outcome-unknown",
@@ -234,6 +247,7 @@ SEND: tuple[Scenario, ...] = (
         "cli/error",
         "error-outcome-unknown.json",
         scripts=(ConnectionScript(response_error=ConnectionResetError(104, "x")),),
+        logs_unchecked=True,
     ),
     Scenario(
         "wrong-host-response",
@@ -338,6 +352,7 @@ VALIDATE: tuple[Scenario, ...] = (
         "validate-test-message-failed.json",
         argv=("--test-message",),
         scripts=(ConnectionScript(status=401),),
+        logs_unchecked=True,
     ),
     Scenario(
         "validate-probe-test-message-ok",
@@ -346,6 +361,7 @@ VALIDATE: tuple[Scenario, ...] = (
         "validate-probe-test-message-ok.json",
         argv=("--probe", "--test-message"),
         scripts=(OBJECT, LIST),
+        logs_unchecked=True,
     ),
     Scenario(
         "validate-disabled-probe",
@@ -407,12 +423,15 @@ def test_the_mode_prints_its_golden_and_a_schema_valid_document(
         posts = [r for c in gw.connections for r in c.requests if r.method == "POST"]
         assert len(posts) == 1 and posts[0].body is not None
         golden.check("request", sc.request, posts[0].body.decode())
+    log = home / ".local" / "state" / "ha-notice" / "log.jsonl"
     if sc.log is not None:
-        log = home / ".local" / "state" / "ha-notice" / "log.jsonl"
-        text = log.read_text(encoding="utf-8").replace(
-            f'"version":"{__version__}"', '"version":"0.1.0"'
-        )
+        raw = log.read_text(encoding="utf-8")
+        # The real version is normalised for the golden, so pin it separately.
+        assert all(json.loads(line)["version"] == __version__ for line in raw.splitlines())
+        text = raw.replace(f'"version":"{__version__}"', '"version":"0.1.0"')
         golden.check("log", sc.log, text, schema="log")
+    elif not sc.logs_unchecked:
+        assert not log.exists(), "this scenario has no log golden but wrote a log record"
 
 
 def test_every_scenario_id_is_unique() -> None:

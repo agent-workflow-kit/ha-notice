@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from tests.harness import GOLDEN_DIR, KINDS, ROOT, load_schema, schema_errors
+from tests.harness import GOLDEN_DIR, KINDS, ROOT, fragment_validator, load_schema, schema_errors
 
 Listing = Mapping[str, Mapping[str, str]]
 
@@ -182,7 +182,10 @@ def _request_items(text: str) -> set[str]:
     if title is None:
         items.add("request:title-absent")
     else:
-        prefixed = [lvl for lvl, p in PREFIXES.items() if title.startswith(p)]
+        # A title that is only the prefix renders as the prefix alone, without the space.
+        prefixed = [
+            lvl for lvl, p in PREFIXES.items() if title == p.rstrip() or title.startswith(p)
+        ]
         items.add(f"request:level:{prefixed[0] if prefixed else 'info'}")
         if title.endswith(TITLE_CUT_MARK):
             items.add("request:title-cut")
@@ -233,6 +236,15 @@ def problems(listing: Listing) -> list[str]:
             found.append(f"output/{name}: not exactly one LF-terminated line")
         for err in schema_errors(output_schema(doc), doc)[:1]:
             found.append(f"output/{name}: {output_schema(doc)}: {err.message}")
+    rendered = fragment_validator("cli/send", "/properties/rendered")
+    for name, text in listing.get("request", {}).items():
+        try:
+            request = json.loads(text)
+        except ValueError:
+            found.append(f"request/{name}: not JSON")
+            continue
+        for err in list(rendered.iter_errors(request))[:1]:
+            found.append(f"request/{name}: cli/send rendered: {err.message}")
     for name, text in listing.get("log", {}).items():
         for number, line in enumerate(text.splitlines(), 1):
             for err in schema_errors("log", json.loads(line))[:1]:
