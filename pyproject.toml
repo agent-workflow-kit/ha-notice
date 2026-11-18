@@ -41,7 +41,10 @@ pythonVersion = "3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["live: needs real models/hosts/credentials; never run in CI"]
+markers = [
+  "live: needs real models/hosts/credentials; never run in CI",
+  "long_alarm: raise the per-test SIGALRM guard from 20 s to 60 s",
+]
 addopts = "-m 'not live'"
 
 [tool.semantic_release]

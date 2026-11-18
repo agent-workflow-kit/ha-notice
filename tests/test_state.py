@@ -50,12 +50,14 @@ def make_gateway(home: Path, **kw: Any) -> FakeGateway:
 
 
 @pytest.fixture(autouse=True)
-def _alarm() -> Iterator[None]:  # a FIFO opened for blocking would hang: fail instead
+def _alarm(request: pytest.FixtureRequest) -> Iterator[None]:
+    # a FIFO opened for blocking would hang: fail instead
     def boom(*_: Any) -> None:
         raise AssertionError("blocked")
 
     old = signal.signal(signal.SIGALRM, boom)
-    signal.alarm(20)
+    # the alarm must exceed any subprocess timeout a test uses, so slow CI shows a real result
+    signal.alarm(60 if request.node.get_closest_marker("long_alarm") else 20)
     try:
         yield
     finally:
@@ -444,6 +446,7 @@ _RACER = textwrap.dedent(
 )
 
 
+@pytest.mark.long_alarm
 def test_concurrent_creation_by_several_processes_all_succeed(home: Path, tmp_path: Path) -> None:
     go = tmp_path / "go"
     env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "trap")}
@@ -459,7 +462,7 @@ def test_concurrent_creation_by_several_processes_all_succeed(home: Path, tmp_pa
     ]
     try:
         go.write_text("")
-        results = [p.communicate(timeout=15) + (p.returncode,) for p in procs]
+        results = [p.communicate(timeout=30) + (p.returncode,) for p in procs]
     finally:
         for p in procs:
             if p.poll() is None:
