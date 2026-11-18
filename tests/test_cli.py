@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-import pytest
-
 from ha_notice.cli import main
 
-
-def test_version_prints_version_and_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as exc:
-        main(["--version"])
-    assert exc.value.code == 0
-    assert capsys.readouterr().out.strip() == "ha-notice 0.0.0"
+# The --version golden lives in test_scaffold.py (it follows the packaged version, which the
+# release job bumps, so a hard-coded string would break on every release).
 
 
 def test_no_arguments_returns_usage_exit_code() -> None:
