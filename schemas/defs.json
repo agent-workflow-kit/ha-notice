@@ -85,7 +85,7 @@
     },
     "error_details": {
       "type": "object",
-      "description": "Fixed strings and numbers only, never an input value. By code or reason: config_invalid -> key (a key name, --config, home when the home directory lookup failed, or a file path); reason invalid_payload -> pointer (may be the empty string); reason link_invalid from link_hosts -> pointer /link (the other link failures have null details); credential_invalid -> env; unavailable -> phase (always input); every code that came from a response (auth_required, host_rejected, rate_limited, upstream_error, wrong_host_response) -> http_status; host_rejected also hint; network_error -> tls, timeout.",
+      "description": "Fixed strings and numbers only, never an input value. By code or reason: config_invalid -> key (a key name, --config, home when the home directory lookup failed, or a file path); reason invalid_payload -> pointer (may be the empty string); reason link_invalid from link_hosts -> pointer /link (the other link failures have null details); credential_invalid -> env; unavailable -> phase (always input); every code that came from an HTTP status (auth_required, host_rejected, rate_limited, upstream_error, wrong_host_response) -> http_status, except a wrong_host_response with unknown_outcome true, whose answer was not HTTP or carried a status outside 100 to 599 or a non-final 1xx (details null; with unknown_outcome true the details are null or carry http_status, nothing else); host_rejected also hint; network_error -> tls, timeout.",
       "properties": {
         "key": {
           "type": "string",
@@ -433,6 +433,45 @@
               "unknown_outcome": {
                 "type": "boolean"
               }
+            },
+            "if": {
+              "properties": {
+                "unknown_outcome": {
+                  "const": false
+                }
+              },
+              "required": [
+                "unknown_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "details"
+              ],
+              "properties": {
+                "details": {
+                  "type": "object",
+                  "required": [
+                    "http_status"
+                  ]
+                }
+              }
+            },
+            "else": {
+              "required": [
+                "details"
+              ],
+              "properties": {
+                "details": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "required": [
+                    "http_status"
+                  ]
+                }
+              }
             }
           }
         },
@@ -645,8 +684,7 @@
                   "auth_required",
                   "host_rejected",
                   "rate_limited",
-                  "upstream_error",
-                  "wrong_host_response"
+                  "upstream_error"
                 ]
               }
             },

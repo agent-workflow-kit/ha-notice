@@ -2,7 +2,7 @@
 
 One attempt is: connect (name resolution, TCP, TLS), build the request, write it, read the
 answer up to a cap. This module owns the wire shape (URL path, headers, body bytes) and the TLS
-trust; it does not classify an answer (TODO(#23)), retry (TODO(#24)) or enforce the whole-send
+trust; it does not classify an answer (``response.py``), retry (TODO(#24)) or enforce the whole-send
 deadline and the writing gate (TODO(#25)). The gate sits between ``open_connection`` and the
 request through the ``before_write`` hook of ``exchange``.
 
@@ -67,7 +67,7 @@ NOTIFY_CONTENT_TYPE = "application/json"
 class TrustError(Exception):
     """No TLS trust could be built. ``reason`` is ``no_trust`` (no usable CA certificates were
     found) or ``ca_file`` (the configured file cannot be used). Both are a ``network_error`` with
-    ``details.tls`` true, decided by #23. The message is fixed; it never holds a path."""
+    ``details.tls`` true, decided by ``response.py``. The message is fixed, never a path."""
 
     def __init__(self, reason: Literal["no_trust", "ca_file"]) -> None:
         super().__init__(
@@ -277,7 +277,7 @@ def exchange(
 
     ``before_write`` runs after the headers are built and before the first call that can put a
     byte on the socket (TODO(#25): the idle-to-writing gate step; it may raise to refuse).
-    Nothing is retried and nothing is classified here (TODO(#23), TODO(#24)). TODO(#25): bound
+    Nothing is retried and nothing is classified here (``response.py``, TODO(#24)). TODO(#25): bound
     the 100-Continue loop with the overall deadline (see ``_read_capped``).
     """
     try:

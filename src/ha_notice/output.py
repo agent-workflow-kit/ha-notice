@@ -78,6 +78,12 @@ MESSAGE_MAX = 2048
 KEY_MAX = 4096
 # interface.md, send: the 400 answer of the host carries this one fixed hint.
 HOST_REJECTED_HINT = "check the notify service name and the message; run validate --test-message"
+NOT_NOTIFY_API_MESSAGE = (
+    "the host did not answer like the notify API; base_url or its path prefix is probably wrong"
+)
+CERTIFICATE_MESSAGE = "the certificate could not be verified; check ca_file"
+NO_TRUST_MESSAGE = "no usable CA certificates were found; check ca_file"
+CA_FILE_MESSAGE = "ca_file cannot be used as trust"
 # The only message overrides: the fixed usage messages of cli.py and the not-implemented guard.
 OVERRIDE_MESSAGES = frozenset(
     {
@@ -99,6 +105,11 @@ OVERRIDE_MESSAGES = frozenset(
         "unexpected --",
         "command not implemented",
         "the --file source cannot be read",
+        # Home Assistant edge (response.py): the messages that name a config key.
+        NOT_NOTIFY_API_MESSAGE,
+        CERTIFICATE_MESSAGE,
+        NO_TRUST_MESSAGE,
+        CA_FILE_MESSAGE,
     }
 )
 _KEY_RE = re.compile(r"[A-Za-z0-9_]{1,64}")
@@ -113,11 +124,9 @@ _DETAILS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "auth_required": (("http_status",), ()),
     "rate_limited": (("http_status",), ()),
     "upstream_error": (("http_status",), ()),
-    # TODO(#27): BadStatusLine, LineTooLong and UnknownProtocol (an answer that is not HTTP after
-    # writing, interface.md: wrong_host_response with unknown_outcome true) carry no status, but
-    # schemas/defs.json requires http_status here. #27 must map them to a status or the
-    # schema/builder must allow a missing status.
-    "wrong_host_response": (("http_status",), ()),
+    # An answer that is not HTTP (BadStatusLine, LineTooLong, UnknownProtocol) or has a status
+    # outside 100 to 599 carries no status: unknown_outcome is then true (see ``_flags``).
+    "wrong_host_response": ((), ("http_status",)),
     "host_rejected": (("http_status", "hint"), ()),
     "network_error": (("tls", "timeout"), ()),
 }
@@ -237,8 +246,10 @@ def _flags(
     if code in ("outcome_unknown", "upstream_error"):
         return tag_sent, True
     # wrong_host_response: a 2xx answer means that the endpoint is not the notify API (possibly
-    # delivered, retrying does not help); any other status was a refusal before delivery.
-    return False, 200 <= details["http_status"] < 300
+    # delivered, retrying does not help); any other status was a refusal before delivery. No
+    # status (an answer that is not HTTP, only possible after writing) is possibly delivered.
+    status = details.get("http_status")
+    return False, status is None or 200 <= status < 300
 
 
 def build_error(
