@@ -6,7 +6,7 @@ grammar is one anchored regex, a port and an IPv6 literal are read from its grou
 is spelled out in ASCII (no ``(?i:...)``, which would fold ``U+212A`` and ``U+017F``). All of it is
 linear in the length, which is capped at 1024 before any pattern runs.
 
-The text is not modified: the scheme is lowercased where the link is rendered (TODO(#17)).
+The text is not modified: the scheme is lowercased where the link is rendered (``render.py``).
 ``link_host_allowed`` is the ``link_hosts`` match (issue #16) on a link that passed ``link_reason``.
 """
 

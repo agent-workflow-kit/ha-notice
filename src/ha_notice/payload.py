@@ -20,8 +20,8 @@ gateway's ``SourceError`` (exit 2 ``usage``), which the caller maps.
 TODO(#26): signals during input (exit 128+N); the caller's ``remaining`` returns 0 on a signal,
 which today reads as a timeout.
 The sanitizer (issue #13, docs/interface.md, Sanitizer) runs inside ``validate_notification``, so
-``Notification.title`` and ``Notification.message`` hold the sanitized text. TODO(#17): the title
-and message cut, the prefix and the budget (rendering).
+``Notification.title`` and ``Notification.message`` hold the sanitized text. The title and message
+cut, the prefix and the budget are in ``render.py`` (issue #17).
 The command-keyword check (issue #14) runs last inside ``validate_notification``, on the sanitized
 message. The link rule (issue #15) is in ``link.py`` and runs before the message checks, followed
 by the ``link_hosts`` check (issue #16); the send flow passes ``Config.link_hosts`` (TODO(#27)).

@@ -1,1 +1,140 @@
-"""Request body and the data allowlist. TODO(#17, #18): implement."""
+"""Request body and the data allowlist (docs/interface.md, Rendering; issue #17).
+
+Pure functions on a validated ``Notification`` and config values: no environment, no files, no
+clock. ``render`` returns the body for the notify service and whether anything was cut;
+``serialize`` is the one JSON form that is sent, hashed and measured.
+
+The title is cut at 256 characters (255 plus an ellipsis), then the level prefix is joined on. The
+message is cut to ``max_chars`` code points and 2000 UTF-8 bytes, marker included. ``data`` is
+built only from ``url``, ``clickAction``, ``tag`` and ``group``, in that order; no caller text
+other than the link and the (already hashed) tag reaches it. The command-keyword rule ran on the
+full sanitized message in ``validate_notification`` and is not repeated here: a cut message ends
+in the marker and so can never be a keyword.
+
+TODO(#18): the tag is computed from the dedupe key by the caller; this module takes the tag.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from ha_notice.payload import Notification
+
+__all__ = ["MARKER", "Rendered", "message_sha256", "render", "serialize"]
+
+TITLE_MAX = 256
+MESSAGE_MAX_BYTES = 2000
+MARKER = "…[truncated]"
+ELLIPSIS = "…"
+
+_TAG = re.compile(r"awkit-[0-9a-f]{24}")
+_GROUP = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_SCHEME = re.compile(r"https?://", re.ASCII | re.IGNORECASE)
+MAX_CHARS_RANGE = (100, 2000)
+
+
+@dataclass(frozen=True)
+class Rendered:
+    """The request body (keys ``title``, ``message``, ``data``; ``title`` and ``data`` omitted
+    when empty) and whether the title or the message was cut."""
+
+    body: dict[str, Any]
+    truncated: bool
+
+
+def _cut_title(title: str) -> tuple[str, bool]:
+    if len(title) <= TITLE_MAX:
+        return title, False
+    return title[: TITLE_MAX - 1] + ELLIPSIS, True
+
+
+def _cut_message(message: str, max_chars: int) -> tuple[str, bool]:
+    """Keep the longest prefix such that it, with trailing whitespace removed, plus the marker
+    fits ``max_chars`` code points and 2000 UTF-8 bytes."""
+    if len(message) <= max_chars and len(message.encode("utf-8")) <= MESSAGE_MAX_BYTES:
+        return message, False
+    char_budget = max_chars - len(MARKER)
+    byte_budget = MESSAGE_MAX_BYTES - len(MARKER.encode("utf-8"))
+    # A message of at most max_chars characters is cut only for bytes, so no slice longer than
+    # char_budget characters is ever needed; also bound the scan by bytes (4 bytes per character
+    # at most) so a 100000-character message is not walked.
+    head = message[: min(char_budget, byte_budget)]
+    kept = 0
+    used = 0
+    for ch in head:
+        used += len(ch.encode("utf-8"))
+        if used > byte_budget:
+            break
+        kept += 1
+    return head[:kept].rstrip() + MARKER, True
+
+
+def message_sha256(title: str | None, message: str) -> str:
+    """First 16 hex characters of the SHA-256 of the UTF-8 bytes of the sanitized title (empty
+    when absent), a LF and the sanitized message, before any cut, prefix or link."""
+    raw = f"{title or ''}\n{message}".encode()
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def _link(link: str) -> str:
+    m = _SCHEME.match(link)
+    if m is None:
+        raise ValueError("link is not an http or https link (validate it first)")
+    return link[: m.end()].lower() + link[m.end() :]
+
+
+def render(
+    notification: Notification,
+    *,
+    max_chars: int,
+    default_group: str | None,
+    level_prefix: Mapping[str, str],
+    tag: str | None = None,
+) -> Rendered:
+    """Build the notify request body. ``tag`` is ``awkit-`` plus 24 hex characters (TODO(#18):
+    the caller derives it from the dedupe key); anything else is a ``ValueError``, as are a
+    ``max_chars`` outside 100 to 2000, a ``default_group`` outside
+    ``[A-Za-z0-9_-]{1,64}``, an unknown level and a link that is not http or https: those are
+    checked upstream and are programming errors here."""
+    if type(max_chars) is not int or not MAX_CHARS_RANGE[0] <= max_chars <= MAX_CHARS_RANGE[1]:
+        raise ValueError("max_chars is not an integer from 100 to 2000")
+    if notification.level not in level_prefix:
+        raise ValueError("unknown level")
+    if tag is not None and _TAG.fullmatch(tag) is None:
+        raise ValueError("tag is not awkit- plus 24 lowercase hex characters")
+    if default_group is not None and _GROUP.fullmatch(default_group) is None:
+        raise ValueError("default_group is not 1 to 64 of [A-Za-z0-9_-]")
+
+    title, title_cut = _cut_title(notification.title or "")
+    prefix = level_prefix[notification.level]
+    line = f"{prefix} {title}" if prefix and title else prefix or title
+    message, message_cut = _cut_message(notification.message, max_chars)
+
+    body: dict[str, Any] = {}
+    if line:
+        body["title"] = line
+    body["message"] = message
+
+    data: dict[str, str] = {}
+    if notification.link is not None:
+        url = _link(notification.link)
+        data["url"] = url
+        data["clickAction"] = url
+    if tag is not None:
+        data["tag"] = tag
+    if default_group is not None:
+        data["group"] = default_group
+    if data:
+        body["data"] = data
+    return Rendered(body=body, truncated=title_cut or message_cut)
+
+
+def serialize(body: Mapping[str, Any]) -> bytes:
+    """The one JSON form of a document that is sent, hashed or measured (docs/interface.md,
+    send): compact separators, keys in insertion order, no ASCII escaping, UTF-8."""
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
