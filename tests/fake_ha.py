@@ -71,7 +71,8 @@ class Reply:
     connection open with ``hang``. ``trickle`` is the pause in seconds between single bytes.
     ``declared_length`` overrides the Content-Length header. ``chunked`` frames the body with
     ``Transfer-Encoding: chunked`` and no Content-Length. ``stall_before_read`` accepts the
-    connection and then neither reads the request nor answers, until the server closes.
+    connection and then neither reads the request nor answers, until the server closes. The
+    stall entry is claimed by the next connection, not the next request.
 
     Header names, values and the content type must be latin-1 without CR or LF (a ``ValueError``
     otherwise), so a scripted reply cannot break the wire format by accident.
@@ -495,6 +496,15 @@ class FakeHA:
     handshake_failures: list[str] = field(default_factory=lambda: [])
     bad_requests: list[str] = field(default_factory=lambda: [])
     handler_errors: list[str] = field(default_factory=lambda: [])
+
+    # Fields the running server reads; assigning one after construction updates the server.
+    _LIVE = frozenset({"token", "prefix", "services", "script", "requests", "received"})
+
+    def __setattr__(self, name: str, value: object) -> None:
+        object.__setattr__(self, name, value)
+        server = self.__dict__.get("_server")
+        if server is not None and name in self._LIVE:
+            setattr(server, name, value)
 
     def __post_init__(self) -> None:
         self._server = _Server(

@@ -170,6 +170,18 @@ def test_no_token_configured_checks_nothing() -> None:
         assert exchange(server, headers=headers)[0] == 200
 
 
+def test_script_assigned_after_construction_is_used() -> None:
+    with FakeHA() as server:
+        server.script = [Reply(status=500)]
+        assert exchange(server, headers=HEADERS)[0] == 500
+
+
+def test_token_assigned_after_construction_is_enforced() -> None:
+    with FakeHA() as server:
+        server.token = "other"
+        assert exchange(server, headers=HEADERS)[0] == 401
+
+
 # --- the edge table -------------------------------------------------------------------------
 
 
