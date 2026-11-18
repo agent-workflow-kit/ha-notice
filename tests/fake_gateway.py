@@ -310,8 +310,13 @@ class FakeGateway:
     def try_lock(self, fd: int) -> bool:
         return self._real.try_lock(fd)
 
-    def rename_state_file(self, dir_fd: int, src: str, dst: str) -> None:
-        self._real.rename_state_file(dir_fd, src, dst)
+    def rename_state_file(
+        self, dir_fd: int, src: str, dst: str, *, missing_ok: bool = False
+    ) -> None:
+        self._real.rename_state_file(dir_fd, src, dst, missing_ok=missing_ok)
+
+    def state_file_size(self, fd: int) -> int:
+        return self._real.state_file_size(fd)
 
     def write_fd(self, fd: int, data: bytes) -> int:
         return self._real.write_fd(fd, data)

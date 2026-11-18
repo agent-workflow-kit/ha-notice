@@ -536,6 +536,45 @@ def test_rename_missing_source_is_a_state_error(real: RealGateway, state: tuple[
         real.rename_state_file(state[0], "absent", "other")
 
 
+def test_rename_missing_source_is_skipped_with_missing_ok(
+    real: RealGateway, state: tuple[int, Path]
+) -> None:
+    dir_fd, d = state
+    real.rename_state_file(dir_fd, "absent", "other", missing_ok=True)
+    assert not (d / "other").exists()
+
+
+def test_rename_missing_ok_still_fails_on_other_errors(
+    real: RealGateway, state: tuple[int, Path]
+) -> None:
+    dir_fd, d = state
+    (d / "src").write_text("x")
+    (d / "dst").mkdir()
+    (d / "dst" / "child").write_text("y")  # a non-empty directory cannot be replaced
+    with pytest.raises(StateDirError):
+        real.rename_state_file(dir_fd, "src", "dst", missing_ok=True)
+
+
+def test_state_file_size_follows_appends(real: RealGateway, state: tuple[int, Path]) -> None:
+    dir_fd, _ = state
+    fd = real.open_state_file(dir_fd, "log.jsonl", append=True)
+    try:
+        assert real.state_file_size(fd) == 0
+        real.write_fd(fd, b"abc\n")
+        assert real.state_file_size(fd) == 4
+    finally:
+        real.close_fd(fd)
+
+
+def test_state_file_size_of_a_closed_descriptor_is_a_state_error(
+    real: RealGateway, state: tuple[int, Path]
+) -> None:
+    fd = real.open_state_file(state[0], "log.jsonl", append=True)
+    real.close_fd(fd)
+    with pytest.raises(StateDirError):
+        real.state_file_size(fd)
+
+
 @pytest.mark.parametrize("src,dst", [("a/b", "c"), ("a", "../c"), ("", "c")])
 def test_rename_names_must_be_plain(
     real: RealGateway, state: tuple[int, Path], src: str, dst: str

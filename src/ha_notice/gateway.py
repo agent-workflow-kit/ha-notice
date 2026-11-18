@@ -193,7 +193,10 @@ class Gateway(Protocol):
     def open_state_dir(self, home: str) -> int: ...
     def open_state_file(self, dir_fd: int, name: str, *, append: bool = False) -> int: ...
     def try_lock(self, fd: int) -> bool: ...
-    def rename_state_file(self, dir_fd: int, src: str, dst: str) -> None: ...
+    def rename_state_file(
+        self, dir_fd: int, src: str, dst: str, *, missing_ok: bool = False
+    ) -> None: ...
+    def state_file_size(self, fd: int) -> int: ...
     def write_fd(self, fd: int, data: bytes) -> int: ...
     def close_fd(self, fd: int) -> None: ...
 
@@ -622,13 +625,26 @@ class RealGateway:
             raise StateDirError("state lock cannot be taken") from None
         return True
 
-    def rename_state_file(self, dir_fd: int, src: str, dst: str) -> None:
+    def rename_state_file(
+        self, dir_fd: int, src: str, dst: str, *, missing_ok: bool = False
+    ) -> None:
+        """Rename within the state directory; with ``missing_ok`` a missing ``src`` is skipped."""
         _plain_name(src)
         _plain_name(dst)
         try:
             os.rename(src, dst, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        except FileNotFoundError:
+            if not missing_ok:
+                raise StateDirError("state file cannot be renamed") from None
         except OSError:
             raise StateDirError("state file cannot be renamed") from None
+
+    def state_file_size(self, fd: int) -> int:
+        """The current size in bytes of an open state file."""
+        try:
+            return os.fstat(fd).st_size
+        except OSError:
+            raise StateDirError("state file cannot be examined") from None
 
     def write_fd(self, fd: int, data: bytes) -> int:
         try:

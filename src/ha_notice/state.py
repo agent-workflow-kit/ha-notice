@@ -6,7 +6,7 @@ symlink; every entry below it is opened relative to that descriptor. Any problem
 ``StateUnusable``, which carries no text and no path, and the caller prints ``STATE_WARNING`` once.
 A state problem never changes an exit code.
 
-This module only opens things. The log record, the lock policy and rotation are TODO(#21).
+This module only opens things; the log record, the lock policy and rotation are in ``log``.
 """
 
 from __future__ import annotations
@@ -47,8 +47,17 @@ class StateDir:
     def try_lock(self, fd: int) -> bool:
         return self._call(lambda: self._gateway.try_lock(fd))
 
-    def rename(self, src: str, dst: str) -> None:
-        self._call(lambda: self._gateway.rename_state_file(self._fd, src, dst))
+    def rename(self, src: str, dst: str, *, missing_ok: bool = False) -> None:
+        self._call(
+            lambda: self._gateway.rename_state_file(self._fd, src, dst, missing_ok=missing_ok)
+        )
+
+    def size(self, fd: int) -> int:
+        return self._call(lambda: self._gateway.state_file_size(fd))
+
+    def close_file(self, fd: int) -> None:
+        """Close a descriptor returned by ``open_file`` (releases a lock held on it)."""
+        self._gateway.close_fd(fd)
 
     def write(self, fd: int, data: bytes) -> int:
         return self._call(lambda: self._gateway.write_fd(fd, data))
