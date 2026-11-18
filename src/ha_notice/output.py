@@ -393,7 +393,7 @@ def record_emitted(exit_code: int) -> None:
     """Note that this invocation has printed its envelope (first call wins).
 
     Every success printer calls ``record_emitted(0)`` so that a later exception cannot produce a
-    second envelope: the dry run and the sent object do. TODO(#28): the probe must too.
+    second envelope: the dry run, the sent object and the validate report do.
     """
     if not _emitted:
         _emitted.append(exit_code)

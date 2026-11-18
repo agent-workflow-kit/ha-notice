@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -731,9 +732,18 @@ def _env(tmp_path: Path) -> dict[str, str]:
     }
 
 
+# A real process whose ``validate`` handler raises, so the exit-1 path runs with the real streams.
+BOOM = (
+    "import sys\nfrom ha_notice import cli\n"
+    "def boom(inv):\n    raise RuntimeError('boom')\n"
+    "cli.HANDLERS['validate'] = boom\n"
+    "import runpy\nrunpy.run_module('ha_notice', run_name='__main__')"  # covers __main__.py
+)
+
+
 def _proc(tmp_path: Path, args: list[str], **streams: Any) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
-        [sys.executable, "-m", "ha_notice", *args],
+        [sys.executable, "-c", BOOM, *args],
         stdin=subprocess.DEVNULL,
         timeout=60,
         check=False,
@@ -743,11 +753,29 @@ def _proc(tmp_path: Path, args: list[str], **streams: Any) -> subprocess.Complet
 
 
 def test_real_process_exit_1_envelope_is_ascii_safe_under_the_c_locale(tmp_path: Path) -> None:
-    # The validate stub exits 1 until #28; this checks the whole exit-1 path of a real process.
+    # A real process whose validate handler raises: the whole exit-1 path (#28 replaced the stub).
     proc = _proc(tmp_path, ["--json", "validate"])
     assert proc.returncode == 1
     assert schema_errors("cli/error", json.loads(proc.stdout)) == []
-    assert proc.stderr == b"internal: command not implemented\n"
+    assert proc.stderr == b"internal: internal error\n"
+
+
+def test_the_unpatched_module_entry_point_runs_validate(tmp_path: Path) -> None:
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("base_url: https://ha.example\nservice: s\n", encoding="utf-8")
+    env = {**_env(tmp_path), "HA_TOKEN": "HA_SECRET_entry_point_tok"}
+    proc = subprocess.run(
+        [sys.executable, "-m", "ha_notice", "--json", "--config", str(cfg), "validate"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=60,
+        check=False,
+        env=env,
+    )
+    assert proc.returncode == 0
+    assert json.loads(proc.stdout)["ok"] is True
+    assert b"HA_SECRET_entry_point_tok" not in proc.stdout + proc.stderr
+    assert not (tmp_path / "home" / "state").exists()
 
 
 def test_real_process_exit_1_to_dev_full_keeps_the_exit_code(tmp_path: Path) -> None:
@@ -767,7 +795,7 @@ def test_real_process_exit_1_with_a_closed_pipe_keeps_the_exit_code(tmp_path: Pa
 
 
 def test_real_process_exit_1_with_closed_standard_streams(tmp_path: Path) -> None:
-    cmd = f"exec {sys.executable} -m ha_notice --json validate 1>&- 2>&-"
+    cmd = f"exec {shlex.quote(sys.executable)} -c {shlex.quote(BOOM)} --json validate 1>&- 2>&-"
     proc = subprocess.run(
         ["/bin/sh", "-c", cmd],
         stdin=subprocess.DEVNULL,
