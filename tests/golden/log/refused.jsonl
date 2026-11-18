@@ -1,0 +1,1 @@
+{"ts":"2023-11-14T22:13:20.123Z","tool":"ha-notice","version":"0.1.0","outcome":"refused","exit":20,"code":"refused","reason":"empty_message","level":"info","bytes":42,"truncated":false,"duration_ms":120,"http_status":null,"message_sha256":"0123456789abcdef","dedupe_key_sha256":null,"tag_set":false,"actor":"auto:cron","actor_source":"default"}
