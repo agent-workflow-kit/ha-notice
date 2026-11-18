@@ -129,6 +129,11 @@ def required() -> set[str]:
         "request:non-ascii",
     }
     items |= set(VARIANTS)
+    # The clear command (docs/interface.md, `clear`): its goldens are named `clear*` and are
+    # counted apart, so they never stand in for a send golden.
+    clear = load_schema("cli/clear")
+    items |= {f"clear:{o}" for o in clear["properties"]["outcome"]["enum"] if o != "disabled"}
+    items |= {"clear:request", "clear:log:sent", "clear:log:failed"}
     return items
 
 
@@ -143,7 +148,16 @@ def _output_exit(doc: Mapping[str, Any]) -> int:
     return {"sent": 0, "dry_run": 0, "disabled": 22}[doc["outcome"]]
 
 
-def _output_items(doc: Mapping[str, Any]) -> set[str]:
+CLEAR_PREFIX = "clear"
+
+
+def _is_clear(name: str) -> bool:
+    return name.startswith(CLEAR_PREFIX)
+
+
+def _output_items(doc: Mapping[str, Any], name: str = "") -> set[str]:
+    if _is_clear(name) and "outcome" in doc:
+        return {f"clear:{doc['outcome']}"}
     items = {f"exit:{_output_exit(doc)}"}
     if "error" in doc:
         err = doc["error"]
@@ -207,19 +221,26 @@ def _log_items(text: str) -> set[str]:
 
 def covered(listing: Listing) -> set[str]:
     items: set[str] = set()
-    for text in listing.get("output", {}).values():
-        items |= _output_items(json.loads(text))
-    for text in listing.get("request", {}).values():
-        items |= _request_items(text)
-    for text in listing.get("log", {}).values():
-        items |= _log_items(text)
+    for name, text in listing.get("output", {}).items():
+        items |= _output_items(json.loads(text), name)
+    for name, text in listing.get("request", {}).items():
+        items |= {"clear:request"} if _is_clear(name) else _request_items(text)
+    for name, text in listing.get("log", {}).items():
+        if _is_clear(name):
+            states = {json.loads(line)["outcome"] for line in text.splitlines()}
+            items |= {f"clear:log:{'sent' if s == 'sent' else 'failed'}" for s in states}
+        else:
+            items |= _log_items(text)
     return items
 
 
-def output_schema(doc: Mapping[str, Any]) -> str:
-    """The schema that governs an output golden, by its shape."""
+def output_schema(doc: Mapping[str, Any], name: str = "") -> str:
+    """The schema that governs an output golden, by its shape (and, for a clear golden, its
+    name: its shape is the one of a send output)."""
     if "error" in doc:
         return "cli/error"
+    if _is_clear(name):
+        return "cli/clear"
     return "cli/validate" if "checks" in doc else "cli/send"
 
 
@@ -234,17 +255,20 @@ def problems(listing: Listing) -> list[str]:
             continue
         if not text.endswith("\n") or text.count("\n") != 1:
             found.append(f"output/{name}: not exactly one LF-terminated line")
-        for err in schema_errors(output_schema(doc), doc)[:1]:
-            found.append(f"output/{name}: {output_schema(doc)}: {err.message}")
+        for err in schema_errors(output_schema(doc, name), doc)[:1]:
+            found.append(f"output/{name}: {output_schema(doc, name)}: {err.message}")
     rendered = fragment_validator("cli/send", "/properties/rendered")
+    clear_rendered = fragment_validator("cli/clear", "/properties/rendered")
     for name, text in listing.get("request", {}).items():
         try:
             request = json.loads(text)
         except ValueError:
             found.append(f"request/{name}: not JSON")
             continue
-        for err in list(rendered.iter_errors(request))[:1]:
-            found.append(f"request/{name}: cli/send rendered: {err.message}")
+        schema = "cli/clear" if _is_clear(name) else "cli/send"
+        check = clear_rendered if _is_clear(name) else rendered
+        for err in list(check.iter_errors(request))[:1]:
+            found.append(f"request/{name}: {schema} rendered: {err.message}")
     for name, text in listing.get("log", {}).items():
         for number, line in enumerate(text.splitlines(), 1):
             for err in schema_errors("log", json.loads(line))[:1]:

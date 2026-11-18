@@ -61,6 +61,7 @@ from ha_notice.render import (
     dedupe_key_sha256,
     message_sha256,
     render,
+    render_clear,
     serialize,
     tag_from_dedupe_key,
 )
@@ -74,12 +75,14 @@ __all__ = [
     "InternalAfterWriting",
     "Plan",
     "Result",
+    "build_clear_plan",
     "build_plan",
     "deliver",
     "execute",
     "internal_after_writing",
     "log_facts",
     "result_facts",
+    "run_clear",
     "run_send",
 ]
 
@@ -90,7 +93,8 @@ TOOL = "ha-notice"
 class Plan:
     """What step 4 hands to step 5: the rendered request and what the output and the log need."""
 
-    notification: Notification
+    level: str  # the notification's level; a clear is logged and printed as ``info``
+    message_sha256: str | None  # None for a clear: it carries no text
     rendered: Rendered
     body: bytes  # the request body in its one serialized form (``bytes`` is its length)
     tag_set: bool
@@ -136,14 +140,12 @@ def _facts(
         unknown_outcome=unknown_outcome,
         code=code,
         reason=reason,
-        level=None if plan is None else plan.notification.level,
+        level=None if plan is None else plan.level,
         bytes=None if plan is None else len(plan.body),
         truncated=None if plan is None else plan.rendered.truncated,
         duration_ms=duration_ms,
         http_status=http_status,
-        message_sha256=None
-        if plan is None
-        else message_sha256(plan.notification.title, plan.notification.message),
+        message_sha256=None if plan is None else plan.message_sha256,
         dedupe_key_sha256=None
         if plan is None or plan.dedupe_key is None
         else dedupe_key_sha256(plan.dedupe_key),
@@ -236,7 +238,7 @@ def _present(inv: Invocation, config: Config, plan: Plan, result: Result) -> int
             output: dict[str, Any] = {
                 "outcome": "sent",
                 "tool": TOOL,
-                "level": plan.notification.level,
+                "level": plan.level,
                 "truncated": plan.rendered.truncated,
                 "bytes": len(plan.body),
                 "duration_ms": duration_ms,
@@ -248,7 +250,7 @@ def _present(inv: Invocation, config: Config, plan: Plan, result: Result) -> int
             write_text(sys.stdout, dumps(output) + "\n")
         record_emitted(EXIT_OK)
         if not inv.json and not inv.quiet:
-            write_text(sys.stderr, f"sent ({plan.notification.level}, {duration_ms} ms)\n")
+            write_text(sys.stderr, f"sent ({plan.level}, {duration_ms} ms)\n")
         code = EXIT_OK
     else:
         emit_error(inv.json, error)
@@ -425,7 +427,29 @@ def build_plan(
         tag=tag,
     )
     body = serialize(rendered.body)
-    return Plan(notification, rendered, body, tag is not None, dedupe_key, started)
+    return Plan(
+        notification.level,
+        message_sha256(notification.title, notification.message),
+        rendered,
+        body,
+        tag is not None,
+        dedupe_key,
+        started,
+    )
+
+
+CLEAR_LEVEL = "info"  # a clear has no level; its output and log record carry the default one
+
+
+def build_clear_plan(dedupe_key: str, started: float) -> Plan:
+    """Step 4 of ``clear``: the tag from the (required) dedupe key and the one fixed body. The
+    plan is delivered by the same ``deliver``/``execute`` as a send's; ``message_sha256`` is null
+    because no text is involved, and the tag is always set (a retry is safe: clearing twice
+    clears once)."""
+    tag = tag_from_dedupe_key(dedupe_key)
+    rendered = render_clear(tag)
+    body = serialize(rendered.body)
+    return Plan(CLEAR_LEVEL, None, rendered, body, True, dedupe_key, started)
 
 
 def _refuse(json_mode: bool, error: ErrorResult) -> int:
@@ -438,15 +462,11 @@ def _verbose(inv: Invocation, phase: str, started: float, now: float) -> None:
         write_text(sys.stderr, f"{phase}: {int((now - started) * 1000)} ms\n")
 
 
-def run_send(inv: Invocation) -> int:
-    args = inv.send
-    if args is None:
-        raise ValueError("send without send arguments")
+def _step2(inv: Invocation) -> Config | int:
+    """Step 2, shared by ``send`` and ``clear``: config (exit 2), the disabled check (exit 22),
+    and for a real run the destination checks (exit 2). Returns the config, or the exit code."""
     gateway = inv.gateway
     signals = inv.signals
-    signals.check()
-
-    # Step 2: config, then the disabled check, then (real send only) the destination.
     try:
         config = load(gateway, inv.config)
     except ConfigError as exc:
@@ -462,6 +482,41 @@ def run_send(inv: Invocation) -> int:
         except ConfigError as exc:
             signals.check()
             return fail(inv.json, "config_invalid", key=exc.key)
+    return config
+
+
+def run_clear(inv: Invocation) -> int:
+    """``clear``: steps 1 and 2 as for ``send``; there is no input (step 3 is empty, the deadline
+    starts now); the body is the fixed command message and the tag (step 4); then the shared
+    delivery (steps 5 to 7) or the dry run."""
+    args = inv.clear
+    if args is None:
+        raise ValueError("clear without clear arguments")
+    gateway = inv.gateway
+    signals = inv.signals
+    signals.check()
+    config = _step2(inv)
+    if isinstance(config, int):
+        return config
+    started = gateway.monotonic()
+    plan = build_clear_plan(args.dedupe_key, started)
+    _verbose(inv, "render", started, gateway.monotonic())
+    signals.check()
+    if not inv.dry_run:
+        return deliver(inv, config, plan)
+    return _print_dry_run(inv, plan)
+
+
+def run_send(inv: Invocation) -> int:
+    args = inv.send
+    if args is None:
+        raise ValueError("send without send arguments")
+    gateway = inv.gateway
+    signals = inv.signals
+    signals.check()
+    config = _step2(inv)
+    if isinstance(config, int):
+        return config
 
     # Step 3: input. The deadline starts here.
     started = gateway.monotonic()
@@ -520,7 +575,7 @@ def _print_dry_run(inv: Invocation, plan: Plan) -> int:
         output: dict[str, Any] = {
             "outcome": "dry_run",
             "tool": TOOL,
-            "level": plan.notification.level,
+            "level": plan.level,
             "truncated": plan.rendered.truncated,
             "bytes": len(plan.body),
             "duration_ms": duration_ms,

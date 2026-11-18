@@ -520,7 +520,7 @@ def test_live_tests_run_against_the_fake_home_assistant(tmp_path: Path) -> None:
         )
         report = done.stdout + done.stderr
         assert done.returncode == 0, report
-        assert "12 passed, 3 skipped" in report, report
+        assert "13 passed, 3 skipped" in report, report
         assert "opt-in only" in report and "needs an https LIVE_HA_BASE_URL" in report
         assert "no TLS chain to verify" in report
         assert TOKEN not in report
@@ -532,11 +532,17 @@ def test_live_tests_run_against_the_fake_home_assistant(tmp_path: Path) -> None:
         assert "raw POST notify with a wrong token: HTTP 401" in report
         # no command word reached the fake without the opt-in
         sent = [json.loads(r.body).get("message") for r in ha.requests if r.method == "POST"]
-        assert not [m for m in sent if m in FAMILY_WORDS]
-        # the tag test: two sends, one tag
-        tagged = [json.loads(r.body) for r in ha.requests if r.method == "POST"]
+        # (the one `clear_notification` is the tool's own `clear`: a body of message and tag only)
+        assert not [m for m in sent if m in FAMILY_WORDS and m != "clear_notification"]
+        everything = [json.loads(r.body) for r in ha.requests if r.method == "POST"]
+        clears = [b for b in everything if b.get("message") == "clear_notification"]
+        assert len(clears) == 1 and set(clears[0]) == {"message", "data"}
+        assert set(clears[0]["data"]) == {"tag"}
+        # the clear test: one send, then a clear with its tag; the tag test: two sends, one tag
+        tagged = [b for b in everything if b not in clears]
         tags = [b["data"]["tag"] for b in tagged if "data" in b and "tag" in b["data"]]
-        assert len(tags) == 2 and tags[0] == tags[1]
+        assert len(tags) == 3 and tags[1] == tags[2] != tags[0]  # (files run in name order)
+        assert tags[0] == clears[0]["data"]["tag"]
         # the link test: both keys from the tool, then each key alone from the raw sender
         datas = [
             b["data"]
@@ -557,9 +563,10 @@ def test_live_tests_run_against_the_fake_home_assistant(tmp_path: Path) -> None:
         assert any(
             b.get("message") == '<b>x</b> <a href="https://example.org">y</a>' for b in tagged
         )
-        assert all(t.startswith("ha-notice live test ") or t == "ha-notice" for t in _titles(ha)), (
-            _titles(ha)
-        )
+        # (the clear has no title: ``_titles`` reads it as an empty one)
+        assert all(
+            t.startswith("ha-notice live test ") or t in ("ha-notice", "") for t in _titles(ha)
+        ), _titles(ha)
         # the prefixed fake got the probe and one send
         assert [r.method for r in prefixed.requests] == ["GET", "POST"]
         assert "tool result after" in report and "network_error" in report

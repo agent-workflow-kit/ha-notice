@@ -87,6 +87,16 @@ $ echo '{"title":"Build","message":"ok","level":"warn"}' | ha-notice send --stdi
 {"outcome":"dry_run","tool":"ha-notice","level":"warn","truncated":false,"bytes":38,"duration_ms":0,"http_status":null,"tag_set":false,"dedupe_key":null,"warnings":[],"rendered":{"title":"WARN: Build","message":"ok"}}
 ```
 
+## Clearing a notification
+
+To remove a notification that was sent with a key, call `clear` with the same key. There is no payload and no stdin; the wrapper and its exit-code rules are the same, so a cron line can clear what an earlier job sent:
+
+```sh
+ha-notice clear --json --actor auto:demo --dedupe-key="$hex"
+```
+
+Exit 22 (disabled) is a successful no-op here too, and `sent` means that Home Assistant accepted the request, not that the phone has removed the notification.
+
 ## Kill timeout and the stdin write
 
 `timeout` in the config is one deadline for the whole send; it defaults to 10 s and may be 1 s to 120 s. The tool ends within `timeout` plus 3 s, so a caller that kills it must wait at least `timeout` plus 10 s: 20 s for the default, 130 s for the maximum. A caller that kills the tool earlier gets no envelope and has to treat the outcome as unknown.

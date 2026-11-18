@@ -22,6 +22,7 @@ ITEMS: dict[str, str] = {
     "V10": "- V10: the command keywords",
     "V18": "(V18;",
     "V20": "- V20: the Android companion app",
+    "V21": "- V21: `clear`",
     "wrong-token": "The 401 body for a wrong (not missing) token",
     "unreachable-host": "an unreachable host's timeout",
     "self-signed": "a self-signed certificate through `ca_file`",
