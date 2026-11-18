@@ -24,7 +24,7 @@ from ha_notice.output import (
     safe_pointer,
 )
 from tests.fake_gateway import FakeGateway
-from tests.harness import Golden, schema_errors
+from tests.harness import Golden, schema_error_pairs, schema_errors
 
 Result = tuple[int, str, str]
 
@@ -876,17 +876,30 @@ def test_wrong_host_response_without_a_status_has_null_details_and_is_unknown() 
     assert (error["details"], error["retryable"], error["unknown_outcome"]) == (None, False, True)
 
 
-def test_the_schema_requires_a_status_for_wrong_host_response_unless_unknown() -> None:
-    def envelope(unknown: bool, details: dict[str, Any] | None) -> dict[str, Any]:
+def test_the_schema_requires_a_status_for_wrong_host_response_unless_not_http() -> None:
+    def envelope(unknown: bool, details: Any) -> dict[str, Any]:
         error = build_error("wrong_host_response", http_status=404).envelope
         error["error"].update(unknown_outcome=unknown, details=details)
         return error
 
+    def pairs(instance: dict[str, Any]) -> set[Any]:
+        return schema_error_pairs("cli/error", instance)
+
     assert schema_errors("cli/error", envelope(True, None)) == []
     assert schema_errors("cli/error", envelope(True, {"http_status": 200})) == []
     assert schema_errors("cli/error", envelope(False, {"http_status": 404})) == []
-    assert schema_errors("cli/error", envelope(False, None)) != []
-    assert schema_errors("cli/error", envelope(False, {})) != []
+    path = ("error", "details")
+    assert (path, "type") in pairs(envelope(False, None))
+    assert (path, "required") in pairs(envelope(False, {}))
+    # an unknown outcome allows null details or a status, nothing else
+    assert (path, "required") in pairs(envelope(True, {}))
+    assert (path, "required") in pairs(envelope(True, {"tls": False, "timeout": False}))
+    missing = envelope(True, None)
+    del missing["error"]["details"]
+    assert (("error",), "required") in pairs(missing)
+    missing_false = envelope(False, None)
+    del missing_false["error"]["details"]
+    assert (("error",), "required") in pairs(missing_false)
     # the other response codes keep requiring the status
     bad = build_error("auth_required", http_status=401).envelope
     bad["error"]["details"] = None

@@ -178,6 +178,37 @@
           "http_status": 404
         }
       }
+    },
+    "wrong_host_response_not_http": {
+      "error": {
+        "code": "wrong_host_response",
+        "message": "m",
+        "retryable": false,
+        "unknown_outcome": true,
+        "details": null
+      }
+    },
+    "wrong_host_response_2xx": {
+      "error": {
+        "code": "wrong_host_response",
+        "message": "m",
+        "retryable": false,
+        "unknown_outcome": true,
+        "details": {
+          "http_status": 200
+        }
+      }
+    },
+    "wrong_host_response_status_not_unknown": {
+      "error": {
+        "code": "wrong_host_response",
+        "message": "m",
+        "retryable": false,
+        "unknown_outcome": false,
+        "details": {
+          "http_status": 200
+        }
+      }
     }
   },
   "invalid": {
@@ -624,6 +655,71 @@
       "path": [
         "error",
         "details"
+      ],
+      "keyword": "required"
+    },
+    "wrong_host_response_null_details_not_unknown": {
+      "instance": {
+        "error": {
+          "code": "wrong_host_response",
+          "message": "m",
+          "retryable": false,
+          "unknown_outcome": false,
+          "details": null
+        }
+      },
+      "path": [
+        "error",
+        "details"
+      ],
+      "keyword": "type"
+    },
+    "wrong_host_response_unknown_empty_details": {
+      "instance": {
+        "error": {
+          "code": "wrong_host_response",
+          "message": "m",
+          "retryable": false,
+          "unknown_outcome": true,
+          "details": {}
+        }
+      },
+      "path": [
+        "error",
+        "details"
+      ],
+      "keyword": "required"
+    },
+    "wrong_host_response_unknown_foreign_details": {
+      "instance": {
+        "error": {
+          "code": "wrong_host_response",
+          "message": "m",
+          "retryable": false,
+          "unknown_outcome": true,
+          "details": {
+            "tls": false,
+            "timeout": false
+          }
+        }
+      },
+      "path": [
+        "error",
+        "details"
+      ],
+      "keyword": "required"
+    },
+    "wrong_host_response_unknown_missing_details": {
+      "instance": {
+        "error": {
+          "code": "wrong_host_response",
+          "message": "m",
+          "retryable": false,
+          "unknown_outcome": true
+        }
+      },
+      "path": [
+        "error"
       ],
       "keyword": "required"
     }

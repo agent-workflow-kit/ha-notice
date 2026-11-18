@@ -195,21 +195,27 @@ def test_3xx_is_wrong_host_response_without_unknown_outcome(status: int) -> None
     assert (error["retryable"], error["unknown_outcome"]) == (False, False)
 
 
-@pytest.mark.parametrize("status", [100, 101, 102, 199, 402, 406, 408, 409, 410, 413, 418, 422])
+@pytest.mark.parametrize("status", [402, 406, 408, 409, 410, 413, 418, 422])
 def test_any_other_listed_range_status_is_wrong_host_response_not_unknown(status: int) -> None:
     error = built(err(classify_response(raw(status, b"[]"), op=Op.SEND)))
     assert (error["code"], error["details"]) == ("wrong_host_response", {"http_status": status})
     assert (error["retryable"], error["unknown_outcome"]) == (False, False)
 
 
-@pytest.mark.parametrize("status", [-1, 0, 1, 99, 600, 601, 999, 1000, 10**9, 2**70])
-def test_a_status_outside_100_to_599_is_not_a_status_and_is_possibly_delivered(
+@pytest.mark.parametrize(
+    "status", [-1, 0, 1, 99, *range(100, 200), 600, 601, 999, 1000, 10**9, 2**70]
+)
+def test_a_status_outside_200_to_599_or_a_1xx_is_not_a_status_and_is_possibly_delivered(
     status: int,
 ) -> None:
+    for op in (Op.SEND, Op.PROBE):
+        spec = err(classify_response(raw(status, b"[]"), op=op))
+        assert (spec.code, spec.details) == ("wrong_host_response", {})
     error = built(err(classify_response(raw(status, b"[]"), op=Op.SEND)))
     assert error["code"] == "wrong_host_response"
     assert error["details"] is None
     assert (error["retryable"], error["unknown_outcome"]) == (False, True)
+    assert schema_errors("cli/error", {"error": error}) == []
 
 
 @pytest.mark.parametrize("status", [True, False, 200.0, "200", None])

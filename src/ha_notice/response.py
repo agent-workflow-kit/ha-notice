@@ -17,7 +17,8 @@ retry loop may do with it: ``RATE_LIMIT`` (a 429: the loop supplies ``retry_afte
 
 Judgment calls, each the conservative reading of the interface:
 
-- A status outside 100 to 599 (``http.client`` lets 600 to 999 through) is not a status: it is
+- A status outside 200 to 599 is not a status: a non-final 1xx (``http.client`` swallows only 100,
+  so 101 to 199 reach the caller) and 600 to 999 (``http.client`` lets them through) are
   ``wrong_host_response`` with no ``http_status`` and ``unknown_outcome`` true, like an answer
   that is not HTTP.
 - An exception class outside the families below (``ValueError``, a bug, ``KeyboardInterrupt``) is
@@ -127,7 +128,7 @@ class ErrorSpec:
 
 def _status_spec(status: object, op: Op) -> ErrorSpec:
     probe = op is Op.PROBE
-    if type(status) is not int or not 100 <= status <= 599:
+    if type(status) is not int or not 200 <= status <= 599:
         return ErrorSpec("wrong_host_response", {}, probe=probe)
     if status == 400:
         return ErrorSpec(
@@ -184,7 +185,13 @@ def _is_timeout(exc: BaseException) -> bool:
 
 
 def classify_exception(exc: BaseException, gate: Gate, *, op: Op) -> ErrorSpec:
-    """Map the exception of one attempt by the gate state; the text of ``exc`` is never read."""
+    """Map the exception of one attempt by the gate state; the text of ``exc`` is never read.
+
+    Callers must not pass ``KeyboardInterrupt`` or ``SystemExit``: the signal handling and the
+    Deadline paragraph of docs/interface.md decide what those do. If one is passed anyway it maps
+    to ``internal``. The routing is owned by #25 and #27.
+    """
+    # todo(#27): route KeyboardInterrupt and SystemExit before this call (signal handling).
     if not isinstance(gate, Gate):
         raise TypeError("gate must be a Gate")
     if not isinstance(op, Op):
@@ -221,5 +228,7 @@ def classify_exception(exc: BaseException, gate: Gate, *, op: Op) -> ErrorSpec:
     if isinstance(exc, RemoteDisconnected | IncompleteRead | OSError):
         return ErrorSpec("outcome_unknown", probe=probe)
     if isinstance(exc, HTTPException):
+        # A local InvalidURL or CannotSendRequest is also wrong_host_response with unknown_outcome
+        # true by design: no answer arrived, and the safe side is "possibly delivered".
         return ErrorSpec("wrong_host_response", {}, probe=probe)
     return internal
