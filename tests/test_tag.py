@@ -37,7 +37,7 @@ def test_matches_the_interface_formula() -> None:
     assert tag_from_dedupe_key(key) == expected
 
 
-@pytest.mark.parametrize("key", ["a", "é", "x" * 1024, "\x00", "\n", "Ünï😀"])
+@pytest.mark.parametrize("key", ["é", "x" * 1024, "\x00", "\n", "Ünï😀"])
 def test_shape_is_lowercase_hex_and_does_not_contain_the_key(key: str) -> None:
     tag = tag_from_dedupe_key(key)
     assert re.fullmatch(r"awkit-[0-9a-f]{24}", tag)
@@ -74,7 +74,7 @@ def test_lone_surrogate_is_a_plain_value_error_without_the_key(key: str) -> None
     with pytest.raises(ValueError, match="UTF-8") as exc:
         tag_from_dedupe_key(key)
     assert type(exc.value) is ValueError
-    assert "a" not in str(exc.value).replace("dedupe key is not valid UTF-8", "")
+    assert str(exc.value) == "dedupe key is not valid UTF-8"
 
 
 def test_non_string_is_refused() -> None:
@@ -85,9 +85,7 @@ def test_non_string_is_refused() -> None:
 def test_derived_tag_is_accepted_by_render_and_lands_in_data() -> None:
     n = Notification(message="hello", level="info", title=None, link=None)
     tag = tag_from_dedupe_key("k")
-    out = render(
-        n, max_chars=1000, default_group=None, level_prefix={"info": ""}, tag=tag
-    )
+    out = render(n, max_chars=1000, default_group=None, level_prefix={"info": ""}, tag=tag)
     assert out.body["data"] == {"tag": tag}
 
 
@@ -95,15 +93,15 @@ def test_derived_tag_is_accepted_by_render_and_lands_in_data() -> None:
 def test_independent_of_locale_and_environment(key: str, tag: str) -> None:
     code = (
         "import sys; from ha_notice.render import tag_from_dedupe_key as t; "
-        "sys.stdout.write(t(sys.argv[1].encode().decode('utf-8')))"
+        "sys.stdout.write(t(open(0, 'rb').read().decode('utf-8')))"
     )
     env = {"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONHASHSEED": "random"}
     for name in ("PATH", "PYTHONPATH", "VIRTUAL_ENV"):
         if name in os.environ:
             env[name] = os.environ[name]
-    # The key crosses a process boundary in a file, never argv, to stay locale-free.
+    # The key crosses the process boundary on stdin as bytes, never argv, to stay locale-free.
     out = subprocess.run(
-        [sys.executable, "-I", "-c", code.replace("sys.argv[1].encode().decode('utf-8')", "open(0, 'rb').read().decode('utf-8')")],
+        [sys.executable, "-I", "-c", code],
         input=key.encode("utf-8"),
         env=env,
         capture_output=True,
