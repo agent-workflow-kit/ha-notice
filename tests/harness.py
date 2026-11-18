@@ -11,7 +11,8 @@ created by hand in the issue that owns them); it is on only with `pytest --updat
 is refused when the `CI` environment variable is set, so CI can never rewrite what it is meant
 to check. A symlink at any component below the golden root is refused in both modes.
 
-TODO(#30): golden files for every --json output, request body and log record.
+The coverage of the golden files (every exit code, error code, check and log outcome has one)
+is tests/test_golden_coverage.py; every mode of the CLI against them is tests/test_golden_modes.py.
 Usage-error goldens (#6) live in tests/golden/output/usage-*.json; the version line is not a
 golden because the release job bumps the version (tests/test_cli.py compares with pyproject).
 Goldens of the error envelope and of the disabled outcome (#7) are
@@ -75,19 +76,33 @@ def _registry() -> Registry[Any]:
     return Registry().with_resources(resources)
 
 
-def validator(name: str) -> Draft202012Validator:
-    """A validator for one schema. No format assertions: the schemas use patterns only."""
-    return Draft202012Validator(load_schema(name), registry=_registry())
+def validator(name: str, definition: str | None = None) -> Draft202012Validator:
+    """A validator for one schema, or for one entry of its `$defs` when `definition` is given.
+
+    No format assertions: the schemas use patterns only.
+    """
+    if definition is None:
+        return Draft202012Validator(load_schema(name), registry=_registry())
+    ref = {"$ref": f"{load_schema(name)['$id']}#/$defs/{definition}"}
+    return Draft202012Validator(ref, registry=_registry())
 
 
-def schema_errors(name: str, instance: Any) -> list[ValidationError]:
-    return list(validator(name).iter_errors(instance))
+def fragment_validator(name: str, pointer: str) -> Draft202012Validator:
+    """A validator for the part of a schema at a JSON pointer such as `/properties/rendered`."""
+    ref = {"$ref": f"{load_schema(name)['$id']}#{pointer}"}
+    return Draft202012Validator(ref, registry=_registry())
+
+
+def schema_errors(name: str, instance: Any, definition: str | None = None) -> list[ValidationError]:
+    return list(validator(name, definition).iter_errors(instance))
 
 
 _NAME_SEGMENT = re.compile(r"[a-z0-9._-]+")
 
 
-def schema_error_pairs(name: str, instance: Any) -> set[tuple[tuple[str | int, ...], str]]:
+def schema_error_pairs(
+    name: str, instance: Any, definition: str | None = None
+) -> set[tuple[tuple[str | int, ...], str]]:
     """Every (instance path, keyword) the schema reports, including inside oneOf/anyOf branches."""
     pairs: set[tuple[tuple[str | int, ...], str]] = set()
 
@@ -96,7 +111,7 @@ def schema_error_pairs(name: str, instance: Any) -> set[tuple[tuple[str | int, .
             pairs.add((tuple(err.absolute_path), str(err.validator)))
             walk(list(err.context or []))
 
-    walk(schema_errors(name, instance))
+    walk(schema_errors(name, instance, definition))
     return pairs
 
 

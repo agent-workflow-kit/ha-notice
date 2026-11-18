@@ -1,0 +1,1 @@
+{"error":{"code":"auth_required","message":"Home Assistant requires authentication","reason":null,"details":{"http_status":401},"retryable":false,"retry_after_s":null,"unknown_outcome":false}}

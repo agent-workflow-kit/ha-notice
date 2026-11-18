@@ -1,0 +1,165 @@
+{
+  "valid": {
+    "tool.name": "ha-notice",
+    "level.info": "info",
+    "level.error": "error",
+    "ts.utc": "2023-11-14T22:13:20.123Z",
+    "sha16.hex": "0123456789abcdef",
+    "dedupe_key.one": "k",
+    "dedupe_key.max": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "actor.human": "human:alice",
+    "actor.auto": "auto:a.b@c/d-e",
+    "actor_source.flag": "flag",
+    "exit_code.twelve": 12,
+    "error_code.host_rejected": "host_rejected",
+    "refusal_reason.link_scheme": "link_scheme",
+    "error_details.empty": {},
+    "error_details.http": {
+      "http_status": 400,
+      "hint": "h"
+    },
+    "error.minimal": {
+      "code": "usage",
+      "message": "m"
+    }
+  },
+  "invalid": {
+    "tool.other": {
+      "instance": "other",
+      "path": [],
+      "keyword": "const"
+    },
+    "level.unknown": {
+      "instance": "fatal",
+      "path": [],
+      "keyword": "enum"
+    },
+    "ts.no_millis": {
+      "instance": "2023-11-14T22:13:20Z",
+      "path": [],
+      "keyword": "pattern"
+    },
+    "ts.trailing_lf": {
+      "instance": "2023-11-14T22:13:20.123Z\n",
+      "path": [],
+      "keyword": "pattern"
+    },
+    "sha16.short": {
+      "instance": "0123456789abcde",
+      "path": [],
+      "keyword": "pattern"
+    },
+    "sha16.upper": {
+      "instance": "0123456789ABCDEF",
+      "path": [],
+      "keyword": "pattern"
+    },
+    "dedupe_key.empty": {
+      "instance": "",
+      "path": [],
+      "keyword": "minLength"
+    },
+    "dedupe_key.too_long": {
+      "instance": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "path": [],
+      "keyword": "maxLength"
+    },
+    "actor.no_kind": {
+      "instance": "alice",
+      "path": [],
+      "keyword": "pattern"
+    },
+    "actor.trailing_lf": {
+      "instance": "human:alice\n",
+      "path": [],
+      "keyword": "pattern"
+    },
+    "actor_source.unknown": {
+      "instance": "env",
+      "path": [],
+      "keyword": "enum"
+    },
+    "exit_code.never_used": {
+      "instance": 21,
+      "path": [],
+      "keyword": "enum"
+    },
+    "exit_code.signal": {
+      "instance": 143,
+      "path": [],
+      "keyword": "enum"
+    },
+    "error_code.reason_as_code": {
+      "instance": "empty_message",
+      "path": [],
+      "keyword": "enum"
+    },
+    "refusal_reason.code_as_reason": {
+      "instance": "refused",
+      "path": [],
+      "keyword": "enum"
+    },
+    "error_details.extra_key": {
+      "instance": {
+        "body": "x"
+      },
+      "path": [],
+      "keyword": "additionalProperties"
+    },
+    "error_details.phase_not_input": {
+      "instance": {
+        "phase": "send"
+      },
+      "path": [
+        "phase"
+      ],
+      "keyword": "const"
+    },
+    "error_details.status_below_range": {
+      "instance": {
+        "http_status": 99
+      },
+      "path": [
+        "http_status"
+      ],
+      "keyword": "minimum"
+    },
+    "error_details.bad_pointer": {
+      "instance": {
+        "pointer": "/a b"
+      },
+      "path": [
+        "pointer"
+      ],
+      "keyword": "pattern"
+    },
+    "error.no_message": {
+      "instance": {
+        "code": "usage"
+      },
+      "path": [],
+      "keyword": "required"
+    },
+    "error.unknown_code": {
+      "instance": {
+        "code": "nope",
+        "message": "m"
+      },
+      "path": [
+        "code"
+      ],
+      "keyword": "enum"
+    },
+    "error.exit_2_retryable": {
+      "instance": {
+        "code": "usage",
+        "message": "m",
+        "retryable": true
+      },
+      "path": [
+        "retryable"
+      ],
+      "keyword": "type"
+    }
+  }
+}

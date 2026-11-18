@@ -1,0 +1,1 @@
+{"error":{"code":"host_rejected","message":"Home Assistant rejected the request","reason":null,"details":{"http_status":400,"hint":"check the notify service name and the message; run validate --test-message"},"retryable":false,"retry_after_s":null,"unknown_outcome":false}}

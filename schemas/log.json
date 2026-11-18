@@ -185,6 +185,24 @@
           },
           "reason": {
             "$ref": "defs.json#/$defs/refusal_reason"
+          },
+          "level": {
+            "type": "null"
+          },
+          "bytes": {
+            "type": "null"
+          },
+          "truncated": {
+            "type": "null"
+          },
+          "message_sha256": {
+            "type": "null"
+          },
+          "dedupe_key_sha256": {
+            "type": "null"
+          },
+          "tag_set": {
+            "type": "null"
           }
         }
       }
@@ -276,6 +294,40 @@
           },
           "code": {
             "const": "internal"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "code": {
+            "const": "unavailable"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "then": {
+        "properties": {
+          "level": {
+            "type": "null"
+          },
+          "bytes": {
+            "type": "null"
+          },
+          "truncated": {
+            "type": "null"
+          },
+          "message_sha256": {
+            "type": "null"
+          },
+          "dedupe_key_sha256": {
+            "type": "null"
+          },
+          "tag_set": {
+            "type": "null"
           }
         }
       }
