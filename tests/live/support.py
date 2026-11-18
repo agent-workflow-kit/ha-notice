@@ -315,12 +315,18 @@ def _spawn_inner(
 def _spawn(
     config: Path, argv: list[str], cfg: LiveConfig, stdin: str, token: str | None, limit_s: float
 ) -> subprocess.CompletedProcess[bytes]:
-    """Run the child; a timeout is re-raised with no frame that holds the child environment."""
+    """Run the child; any failure is re-raised from a frame that holds no child environment."""
+    timed_out = False
+    failure = ""
     try:
         return _spawn_inner(config, argv, cfg, stdin, token, limit_s)
     except subprocess.TimeoutExpired:
-        pass
-    raise ToolTimeout(f"the tool did not end within {limit_s:g} s")
+        timed_out = True
+    except Exception as exc:
+        failure = type(exc).__name__
+    if timed_out:
+        raise ToolTimeout(f"the tool did not end within {limit_s:g} s")
+    raise RuntimeError(f"the tool could not be started: {failure}")
 
 
 def _fail_if_token_printed(cfg: LiveConfig, token: str | None, run: ToolRun) -> None:

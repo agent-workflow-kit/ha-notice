@@ -660,6 +660,16 @@ def test_tool_prints_the_token(tmp_path, monkeypatch):
     leaked = subprocess.CompletedProcess([], 0, os.environ["HA_CANARY"].encode(), b"")
     monkeypatch.setattr(support, "_spawn", lambda *args: leaked)
     support.run_tool(tmp_path / "c.yaml", ["validate"], cfg)
+
+
+def test_spawn_fails_to_start(tmp_path, monkeypatch):
+    cfg = _cfg()
+
+    def refuse(*args, **kwargs):
+        raise OSError("cannot start")
+
+    monkeypatch.setattr(subprocess, "run", refuse)
+    support.run_tool(tmp_path / "c.yaml", ["validate"], cfg)
 """
 
 
@@ -675,8 +685,9 @@ def test_failures_with_showlocals_never_print_the_token(tmp_path: Path) -> None:
         HA_CANARY=CANARY,
     )
     report = done.stdout + done.stderr
-    assert done.returncode == 1 and "3 failed" in report, report
+    assert done.returncode == 1 and "4 failed" in report, report
     assert "RawRequestError: ConnectionRefusedError" in report
+    assert "RuntimeError: the tool could not be started: OSError" in report
     assert "ToolTimeout" in report and "the tool printed the token" in report
     for secret in (CANARY, "canary_service_x", f"127.0.0.1:{port}", "Bearer"):
         assert secret not in report, secret
