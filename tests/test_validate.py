@@ -1,7 +1,7 @@
 """The validate command (issue #28): checks, probe, output and exit codes.
 
 ``cli.main(argv, env, gateway)`` with the fake gateway, so nothing sleeps and no socket opens.
-Real-socket and real-process coverage is in tests/test_validate_socket.py.
+Real-socket and real-process coverage is in tests/test_validate_process.py.
 """
 
 from __future__ import annotations
@@ -538,20 +538,24 @@ def test_a_signal_during_the_probe_is_decided_like_the_deadline(
     assert doc(out)["checks"][-1]["message"].startswith("network_error")
 
 
-def test_a_signal_after_the_result_does_not_change_the_exit_code(rig: Rig) -> None:
-    class Sig(FakeGateway):
-        def exit_process(self, code: int) -> Any:  # pragma: no cover - not used here
-            raise AssertionError
-
-    gw = Sig(home=rig.gw.home, ca=rig.gw.ca, default_script=ConnectionScript(body=b"{}"))
-    original = gw.close_fd
-
-    def late(fd: int) -> None:
-        original(fd)
-
-    code, out, _ = rig.run(["--json", "validate", "--probe"], gateway=gw)
-    gw.deliver_signal(signal.SIGTERM)
-    assert code == 0 and doc(out)["ok"] is True
+@pytest.mark.parametrize(
+    "script",
+    [
+        ConnectionScript(connect_error=ValueError("x")),
+        ConnectionScript(request_error=KeyError("x"), request_bytes_before_error=5),
+    ],
+    ids=["connect_error", "request_error_after_partial_write"],
+)
+def test_an_internal_probe_verdict_is_exit_1_with_one_internal_envelope(
+    rig: Rig, script: ConnectionScript
+) -> None:
+    rig.gw.default_script = script
+    code, out, err = rig.run(["--json", "validate", "--probe"])
+    assert code == 1 and out.count("\n") == 1
+    body = json.loads(out)
+    assert body["error"]["code"] == "internal" and "checks" not in body
+    assert err.splitlines().count("internal: internal error") == 1
+    assert TOKEN not in out + err
 
 
 # --- failures that are bugs -----------------------------------------------------------------

@@ -63,7 +63,7 @@
     },
     "failed_probe": {
       "ok": false,
-      "enabled": false,
+      "enabled": true,
       "probe": {
         "api_ok": false
       },
