@@ -158,7 +158,7 @@ def safe_key(name: str) -> str:
 
     Callers own this call for every config key name read from a file. Fixed literals (``--config``,
     ``home``) and file paths are passed to ``build_error`` as they are, not through here.
-    TODO(#8): config key names must pass through ``safe_key`` where ``config_invalid`` is built.
+    ``config.py`` does this for every unknown key name.
     """
     return name if _KEY_RE.fullmatch(name) else "?"
 

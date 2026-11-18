@@ -1,7 +1,7 @@
 """Gateway: the single boundary for everything the outside world provides.
 
-HTTP, the clocks, name resolution, the home directory and uid, input reading, state-directory
-access, CA path candidates and process exit all live here. No other module imports
+HTTP, the clocks, name resolution, the home directory and uid, input reading, config file reading,
+state-directory access, CA path candidates and process exit all live here. No other module imports
 ``http.client``, ``time`` or ``subprocess`` (``tests/test_gateway_boundary.py`` scans for it),
 this tool never runs a subprocess, and ``urllib`` is not used at all. Process tests pass a fake
 (``tests/fake_gateway.py``) to ``cli.main(argv, env, gateway)``; there is no test-only
@@ -49,6 +49,7 @@ from typing import Literal, NoReturn, Protocol
 __all__ = [
     "SLICE_SECONDS",
     "FILE_CHUNK",
+    "MAX_CONFIG_ENTRIES",
     "AddrInfo",
     "BadStatusLine",
     "CaCandidates",
@@ -74,6 +75,7 @@ __all__ = [
 # Input is read in slices of at most 100 ms so the caller notices a deadline between slices.
 SLICE_SECONDS = 0.1
 FILE_CHUNK = 64 * 1024
+MAX_CONFIG_ENTRIES = 256
 
 STATE_DIR_PARTS = (".local", "state", "ha-notice")
 CA_FALLBACK_FILES = (
@@ -182,6 +184,10 @@ class Gateway(Protocol):
     def read_source(
         self, source: int | str, max_bytes: int, remaining: Callable[[], float]
     ) -> SourceResult: ...
+
+    # Config files
+    def read_config(self, path: str, max_bytes: int) -> bytes | None: ...
+    def list_config_dir(self, path: str) -> list[str]: ...
 
     # State directory
     def open_state_dir(self, home: str) -> int: ...
@@ -472,6 +478,60 @@ class RealGateway:
             if len(data) > max_bytes:
                 return SourceResult(bytes(data[:max_bytes]), "too_large")
         return SourceResult(bytes(data), "ok")
+
+    # --- config files
+    def read_config(self, path: str, max_bytes: int) -> bytes | None:
+        """Read a config file of at most ``max_bytes``; ``None`` when it does not exist.
+
+        The path is opened ``O_NONBLOCK`` (a FIFO never blocks) and ``O_NOCTTY``, and the opened
+        descriptor must be a regular file; symlinks are followed. A file that is not regular,
+        cannot be read or is larger than ``max_bytes`` is ``SourceError``. Only a missing file
+        (also a dangling symlink) is ``None``.
+        """
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            raise SourceError("config file cannot be opened") from None
+        failed = ""
+        data = bytearray()
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                failed = "config file is not a regular file"
+            while not failed:
+                try:
+                    chunk = os.read(fd, min(FILE_CHUNK, max_bytes + 1 - len(data)))
+                except OSError:
+                    failed = "config file cannot be read"
+                    break
+                if not chunk:
+                    break
+                data += chunk
+                if len(data) > max_bytes:
+                    failed = "config file is too large"
+        finally:
+            os.close(fd)
+        if failed:
+            raise SourceError(failed)
+        return bytes(data)
+
+    def list_config_dir(self, path: str) -> list[str]:
+        """Names of the ``*.yaml`` entries (not starting with a dot) of a directory, sorted.
+
+        A missing directory is an empty list; anything else that is not a readable directory, or
+        more than ``MAX_CONFIG_ENTRIES`` matching names, is ``SourceError``.
+        """
+        try:
+            names = os.listdir(path)
+        except FileNotFoundError:
+            return []
+        except (OSError, ValueError):
+            raise SourceError("config directory cannot be read") from None
+        found = sorted(n for n in names if n.endswith(".yaml") and not n.startswith("."))
+        if len(found) > MAX_CONFIG_ENTRIES:
+            raise SourceError("config directory has too many files")
+        return found
 
     # --- state directory
     def open_state_dir(self, home: str) -> int:
