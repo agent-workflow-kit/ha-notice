@@ -109,3 +109,10 @@ def test_independent_of_locale_and_environment(key: str, tag: str) -> None:
         timeout=60,
     )
     assert out.stdout.decode() == tag
+
+
+def test_longest_multibyte_key_the_cli_accepts_derives() -> None:
+    # tests/test_cli.py accepts 1024 characters of 2 bytes each; the limit is in characters.
+    key = "é" * DEDUPE_KEY_MAX
+    expected = "awkit-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+    assert tag_from_dedupe_key(key) == expected
