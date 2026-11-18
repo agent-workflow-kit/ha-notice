@@ -6,6 +6,8 @@ import pytest
 
 from tests.harness import Golden
 
+pytest_plugins = ["pytester"]  # tests/test_conftest.py runs inner pytest sessions
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(

@@ -92,7 +92,8 @@
   "invalid": {
     "empty": {
       "instance": {},
-      "path": []
+      "path": [],
+      "keyword": "required"
     },
     "ok_true_with_failed_check": {
       "instance": {
@@ -106,7 +107,10 @@
           }
         ]
       },
-      "path": []
+      "path": [
+        "ok"
+      ],
+      "keyword": "const"
     },
     "ok_false_all_ok": {
       "instance": {
@@ -120,14 +124,18 @@
           }
         ]
       },
-      "path": []
+      "path": [
+        "ok"
+      ],
+      "keyword": "const"
     },
     "missing_checks": {
       "instance": {
         "ok": true,
         "enabled": true
       },
-      "path": []
+      "path": [],
+      "keyword": "required"
     },
     "unknown_check_name": {
       "instance": {
@@ -141,7 +149,12 @@
           }
         ]
       },
-      "path": []
+      "path": [
+        "checks",
+        0,
+        "name"
+      ],
+      "keyword": "enum"
     },
     "check_without_message": {
       "instance": {
@@ -154,7 +167,11 @@
           }
         ]
       },
-      "path": []
+      "path": [
+        "checks",
+        0
+      ],
+      "keyword": "required"
     },
     "warnings_key": {
       "instance": {
@@ -163,7 +180,8 @@
         "checks": [],
         "warnings": []
       },
-      "path": []
+      "path": [],
+      "keyword": "additionalProperties"
     },
     "probe_without_api_ok": {
       "instance": {
@@ -172,20 +190,27 @@
         "probe": {},
         "checks": []
       },
-      "path": []
+      "path": [
+        "probe"
+      ],
+      "keyword": "required"
     },
     "disabled_with_extra": {
       "instance": {
         "outcome": "disabled",
         "ok": true
       },
-      "path": []
+      "path": [],
+      "keyword": "additionalProperties"
     },
     "other_outcome": {
       "instance": {
         "outcome": "sent"
       },
-      "path": []
+      "path": [
+        "outcome"
+      ],
+      "keyword": "const"
     }
   }
 }

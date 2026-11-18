@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -73,6 +73,7 @@ dev = [
     { name = "pyright" },
     { name = "pytest" },
     { name = "pyyaml" },
+    { name = "referencing" },
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
@@ -86,8 +87,9 @@ dev = [
     { name = "pyright", specifier = ">=1.1.380" },
     { name = "pytest", specifier = ">=8" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "referencing", specifier = ">=0.35" },
     { name = "ruff", specifier = ">=0.6" },
-    { name = "types-pyyaml", specifier = ">=6.0.12.20261113" },
+    { name = "types-pyyaml", specifier = ">=6.0.12" },
 ]
 
 [[package]]

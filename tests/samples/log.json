@@ -156,7 +156,8 @@
   "invalid": {
     "empty": {
       "instance": {},
-      "path": []
+      "path": [],
+      "keyword": "required"
     },
     "ts_trailing_lf": {
       "instance": {
@@ -180,7 +181,8 @@
       },
       "path": [
         "ts"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "ts_no_millis": {
       "instance": {
@@ -204,7 +206,8 @@
       },
       "path": [
         "ts"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "ts_offset": {
       "instance": {
@@ -228,7 +231,8 @@
       },
       "path": [
         "ts"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "actor_trailing_lf": {
       "instance": {
@@ -252,7 +256,8 @@
       },
       "path": [
         "actor"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "actor_no_prefix": {
       "instance": {
@@ -276,7 +281,8 @@
       },
       "path": [
         "actor"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "actor_too_long": {
       "instance": {
@@ -300,7 +306,8 @@
       },
       "path": [
         "actor"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "actor_source_bad": {
       "instance": {
@@ -324,7 +331,8 @@
       },
       "path": [
         "actor_source"
-      ]
+      ],
+      "keyword": "enum"
     },
     "hash_trailing_lf": {
       "instance": {
@@ -348,7 +356,8 @@
       },
       "path": [
         "message_sha256"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "hash_too_long": {
       "instance": {
@@ -372,7 +381,8 @@
       },
       "path": [
         "message_sha256"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "hash_uppercase": {
       "instance": {
@@ -396,7 +406,8 @@
       },
       "path": [
         "message_sha256"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "wrong_tool": {
       "instance": {
@@ -420,7 +431,8 @@
       },
       "path": [
         "tool"
-      ]
+      ],
+      "keyword": "const"
     },
     "bad_exit": {
       "instance": {
@@ -444,7 +456,8 @@
       },
       "path": [
         "exit"
-      ]
+      ],
+      "keyword": "const"
     },
     "bad_outcome": {
       "instance": {
@@ -468,7 +481,8 @@
       },
       "path": [
         "outcome"
-      ]
+      ],
+      "keyword": "enum"
     },
     "sent_with_code": {
       "instance": {
@@ -492,7 +506,8 @@
       },
       "path": [
         "code"
-      ]
+      ],
+      "keyword": "type"
     },
     "sent_exit_12": {
       "instance": {
@@ -516,7 +531,8 @@
       },
       "path": [
         "exit"
-      ]
+      ],
+      "keyword": "const"
     },
     "refused_wrong_exit": {
       "instance": {
@@ -540,7 +556,8 @@
       },
       "path": [
         "exit"
-      ]
+      ],
+      "keyword": "const"
     },
     "refused_without_reason": {
       "instance": {
@@ -564,7 +581,8 @@
       },
       "path": [
         "reason"
-      ]
+      ],
+      "keyword": "enum"
     },
     "refused_reason_not_a_code": {
       "instance": {
@@ -588,7 +606,8 @@
       },
       "path": [
         "code"
-      ]
+      ],
+      "keyword": "const"
     },
     "failed_with_unknown_code": {
       "instance": {
@@ -612,7 +631,8 @@
       },
       "path": [
         "code"
-      ]
+      ],
+      "keyword": "enum"
     },
     "failed_with_reason": {
       "instance": {
@@ -636,7 +656,8 @@
       },
       "path": [
         "reason"
-      ]
+      ],
+      "keyword": "type"
     },
     "outcome_unknown_bad_code": {
       "instance": {
@@ -658,7 +679,8 @@
         "actor": "auto:cron",
         "actor_source": "default"
       },
-      "path": []
+      "path": [],
+      "keyword": "anyOf"
     },
     "exit_1_not_outcome_unknown": {
       "instance": {
@@ -682,7 +704,8 @@
       },
       "path": [
         "exit"
-      ]
+      ],
+      "keyword": "const"
     },
     "exit_1_wrong_code": {
       "instance": {
@@ -706,7 +729,8 @@
       },
       "path": [
         "code"
-      ]
+      ],
+      "keyword": "const"
     },
     "missing_field": {
       "instance": {
@@ -727,7 +751,8 @@
         "actor": "auto:cron",
         "actor_source": "default"
       },
-      "path": []
+      "path": [],
+      "keyword": "required"
     },
     "extra_field_message": {
       "instance": {
@@ -750,7 +775,8 @@
         "actor_source": "default",
         "message": "secret text"
       },
-      "path": []
+      "path": [],
+      "keyword": "additionalProperties"
     },
     "negative_duration": {
       "instance": {
@@ -774,7 +800,8 @@
       },
       "path": [
         "duration_ms"
-      ]
+      ],
+      "keyword": "minimum"
     },
     "null_duration": {
       "instance": {
@@ -798,7 +825,8 @@
       },
       "path": [
         "duration_ms"
-      ]
+      ],
+      "keyword": "type"
     },
     "status_range": {
       "instance": {
@@ -822,7 +850,8 @@
       },
       "path": [
         "http_status"
-      ]
+      ],
+      "keyword": "minimum"
     }
   }
 }

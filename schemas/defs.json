@@ -85,7 +85,7 @@
     },
     "error_details": {
       "type": "object",
-      "description": "Fixed strings and numbers only, never an input value. By code or reason: config_invalid -> key (a key name, --config, home when the home directory lookup failed, or a file path); reason invalid_payload or link_invalid -> pointer (may be the empty string); credential_invalid -> env; unavailable -> phase (always input); every code that came from a response (auth_required, host_rejected, rate_limited, upstream_error, wrong_host_response) -> http_status; host_rejected also hint; network_error -> tls, timeout.",
+      "description": "Fixed strings and numbers only, never an input value. By code or reason: config_invalid -> key (a key name, --config, home when the home directory lookup failed, or a file path); reason invalid_payload -> pointer (may be the empty string); reason link_invalid from link_hosts -> pointer /link (the other link failures have null details); credential_invalid -> env; unavailable -> phase (always input); every code that came from a response (auth_required, host_rejected, rate_limited, upstream_error, wrong_host_response) -> http_status; host_rejected also hint; network_error -> tls, timeout.",
       "properties": {
         "key": {
           "type": "string",
@@ -588,14 +588,23 @@
             ]
           },
           "then": {
-            "required": [
-              "details"
-            ],
             "properties": {
               "details": {
-                "type": "object",
-                "required": [
-                  "pointer"
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "pointer"
+                    ],
+                    "properties": {
+                      "pointer": {
+                        "const": "/link"
+                      }
+                    }
+                  }
                 ]
               }
             }
@@ -634,7 +643,10 @@
               "code": {
                 "enum": [
                   "auth_required",
-                  "host_rejected"
+                  "host_rejected",
+                  "rate_limited",
+                  "upstream_error",
+                  "wrong_host_response"
                 ]
               }
             },

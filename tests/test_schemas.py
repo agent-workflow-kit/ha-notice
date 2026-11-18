@@ -1,13 +1,15 @@
 """Every schema loads, is draft 2020-12, accepts its positive samples and rejects its negatives.
 
 Samples live in tests/samples/<schema name>.json:
-  {"valid": {name: instance}, "invalid": {name: {"instance": ..., "path": [...]}}}
-`path` is the instance location (list of keys/indexes) of at least one reported error, so a
-negative sample must fail for the reason it names, not for some other one.
+  {"valid": {name: instance}, "invalid": {name: {"instance": ..., "path": [...], "keyword": k}}}
+`path` is the instance location (list of keys/indexes) and `keyword` the schema keyword
+(`required`, `pattern`, `const`, ...) of one reported error (errors inside oneOf/anyOf branches
+included), so a negative sample must fail for the reason it names, not for some other one.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -17,14 +19,15 @@ import pytest
 import yaml
 from jsonschema import Draft202012Validator
 
-from tests.harness import ROOT, load_schema, schema_errors, schema_names
+from tests.harness import ROOT, load_schema, schema_error_pairs, schema_errors, schema_names
 
 SAMPLES = Path(__file__).parent / "samples"
 DRAFT = "https://json-schema.org/draft/2020-12/schema"
 LF_SAFE_END = r"(?![\s\S])"
-# Prefix checks that are not full matches, so a trailing LF is irrelevant: the scheme rule that
-# applies when allow_insecure_http is not true (the base_url pattern itself is LF-safe).
-PREFIX_ONLY_PATTERNS = {"^[Hh][Tt][Tt][Pp][Ss]://"}
+# The one pattern that is a prefix check, not a full match, so a trailing LF is irrelevant: the
+# scheme rule of config.json that applies when allow_insecure_http is not true (the base_url
+# pattern itself is LF-safe). Keyed by schema name, location and exact pattern.
+PREFIX_ONLY_PATTERN = ("config", "/allOf/0/then/base_url", "^[Hh][Tt][Tt][Pp][Ss]://")
 # defs.json holds shared definitions only; its definitions are exercised through the others.
 SAMPLED = [n for n in schema_names() if n != "defs"]
 
@@ -70,11 +73,28 @@ def test_schema_id_matches_its_path(name: str) -> None:
 @pytest.mark.parametrize("name", schema_names())
 def test_every_pattern_refuses_a_trailing_lf(name: str) -> None:
     # JSON Schema `$` accepts a trailing LF; every pattern must end with (?![\s\S]) instead.
-    patterns = _patterns(load_schema(name))
     bad = [
-        (w, p) for w, p in patterns if not p.endswith(LF_SAFE_END) and p not in PREFIX_ONLY_PATTERNS
+        (w, p)
+        for w, p in _patterns(load_schema(name))
+        if not p.endswith(LF_SAFE_END) and (name, w, p) != PREFIX_ONLY_PATTERN
     ]
     assert bad == []
+
+
+@pytest.mark.parametrize("name", schema_names())
+def test_every_pattern_is_anchored_at_the_start_and_has_no_dollar(name: str) -> None:
+    # A pattern is a search, so it must start with ^; an unescaped $ would accept a trailing LF.
+    unanchored = [(w, p) for w, p in _patterns(load_schema(name)) if not p.startswith("^")]
+    dollars = [(w, p) for w, p in _patterns(load_schema(name)) if "$" in re.sub(r"\\.", "", p)]
+    assert unanchored == []
+    assert dollars == []
+
+
+def test_only_the_scheme_prefix_pattern_is_exempt_from_the_lf_guard() -> None:
+    name, where, pattern = PREFIX_ONLY_PATTERN
+    assert (where, pattern) in _patterns(load_schema(name))
+    # and it is not the schema's own base_url pattern: that one is LF-safe
+    assert load_schema(name)["properties"]["base_url"]["pattern"].endswith(LF_SAFE_END)
 
 
 @pytest.mark.parametrize("name", SAMPLED)
@@ -95,16 +115,67 @@ def test_positive_sample_validates(name: str, key: str) -> None:
 
 
 @pytest.mark.parametrize(("name", "key"), _cases("invalid"))
-def test_negative_sample_is_rejected_at_its_named_location(name: str, key: str) -> None:
+def test_negative_sample_is_rejected_at_its_named_location_for_its_named_keyword(
+    name: str, key: str
+) -> None:
     sample = _samples(name)["invalid"][key]
-    errors = schema_errors(name, sample["instance"])
-    assert errors, "negative sample was accepted"
-    paths = [list(e.absolute_path) for e in errors]
-    assert sample["path"] in paths, f"rejected at {paths}, expected {sample['path']}"
+    assert set(sample) == {"instance", "path", "keyword"}
+    pairs = schema_error_pairs(name, sample["instance"])
+    assert pairs, "negative sample was accepted"
+    assert (tuple(sample["path"]), sample["keyword"]) in pairs, (
+        f"expected {sample['keyword']} at {sample['path']}, got {sorted(map(str, pairs))}"
+    )
 
 
-# The three patterns the issue names: the schema refuses a trailing LF, and so does a
-# full match (which is how the tool applies every pattern).
+def _without(instance: dict[str, Any], field: str) -> dict[str, Any]:
+    return {k: v for k, v in instance.items() if k != field}
+
+
+def _required_cases(name: str, samples: list[str]) -> list[Any]:
+    return [
+        pytest.param(name, s, field, id=f"{name}:{s}:{field}")
+        for s in samples
+        for field in _samples(name)["valid"][s]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "sample", "field"),
+    _required_cases("log", list(_samples("log")["valid"]))
+    + _required_cases("cli/send", ["sent", "sent_with_key_and_warning", "dry_run"]),
+)
+def test_removing_any_field_of_a_log_record_or_send_output_fails_as_required(
+    name: str, sample: str, field: str
+) -> None:
+    instance = _without(copy.deepcopy(_samples(name)["valid"][sample]), field)
+    assert ((), "required") in schema_error_pairs(name, instance)
+
+
+def test_the_log_schema_requires_exactly_the_fields_of_a_record() -> None:
+    record = _samples("log")["valid"]["sent"]
+    assert set(load_schema("log")["required"]) == set(record)
+
+
+_LEVELS = ["info", "warn", "action", "error"]
+
+
+@pytest.mark.parametrize("level", _LEVELS)
+def test_level_prefix_refuses_a_trailing_lf(level: str) -> None:
+    assert schema_errors("config", {"level_prefix": {level: "WARN:"}}) == []
+    assert schema_errors("config", {"level_prefix": {level: "WARN:\n"}}) != []
+    assert schema_errors("config", {"level_prefix": {level: "\n"}}) != []
+
+
+def test_link_hosts_refuses_a_trailing_lf() -> None:
+    assert schema_errors("config", {"link_hosts": ["example.com"]}) == []
+    assert schema_errors("config", {"link_hosts": ["example.com\n"]}) != []
+    assert schema_errors("config", {"link_hosts": ["example.com", "b.example.org\n"]}) != []
+
+
+# token_env and default_group: the schema refuses a trailing LF, and so does a full match (which
+# is how the tool applies every pattern). The actor pattern has its own test below.
+# TODO(#10): the tool's token_env check (re.fullmatch of this same pattern) is tested there.
+# TODO(#9): the tool's default_group check (re.fullmatch of this same pattern) is tested there.
 @pytest.mark.parametrize(
     ("schema", "path", "good"),
     [
@@ -120,6 +191,7 @@ def test_config_patterns_agree_with_a_full_match(schema: str, path: list[str], g
 
 
 def test_actor_pattern_agrees_with_a_full_match() -> None:
+    # TODO(#6): the tool's --actor check (re.fullmatch of this same pattern) is tested there.
     pattern = load_schema("defs")["$defs"]["actor"]["pattern"]
     for value, ok in [("human:me", True), ("auto:a.b", True), ("human:me\n", False)]:
         assert bool(re.fullmatch(pattern, value)) is ok

@@ -56,18 +56,41 @@
         "title": "WARN: t",
         "message": "m",
         "data": {
-          "tag": "x"
+          "tag": "awkit-0123456789abcdef01234567"
         }
       }
     },
     "disabled": {
       "outcome": "disabled"
+    },
+    "dry_run_full_data": {
+      "outcome": "dry_run",
+      "tool": "ha-notice",
+      "level": "info",
+      "truncated": false,
+      "bytes": 42,
+      "duration_ms": 120,
+      "http_status": null,
+      "tag_set": false,
+      "dedupe_key": null,
+      "warnings": [],
+      "rendered": {
+        "title": "WARN: t",
+        "message": "m",
+        "data": {
+          "url": "https://a.example/x",
+          "clickAction": "https://a.example/x",
+          "tag": "awkit-0123456789abcdef01234567",
+          "group": "awkit"
+        }
+      }
     }
   },
   "invalid": {
     "empty": {
       "instance": {},
-      "path": []
+      "path": [],
+      "keyword": "required"
     },
     "bad_outcome": {
       "instance": {
@@ -75,14 +98,16 @@
       },
       "path": [
         "outcome"
-      ]
+      ],
+      "keyword": "enum"
     },
     "disabled_with_extra": {
       "instance": {
         "outcome": "disabled",
         "tool": "ha-notice"
       },
-      "path": []
+      "path": [],
+      "keyword": "maxProperties"
     },
     "sent_missing_field": {
       "instance": {
@@ -96,7 +121,8 @@
         "dedupe_key": null,
         "warnings": []
       },
-      "path": []
+      "path": [],
+      "keyword": "required"
     },
     "sent_with_rendered": {
       "instance": {
@@ -114,7 +140,8 @@
           "message": "m"
         }
       },
-      "path": []
+      "path": [],
+      "keyword": "not"
     },
     "sent_null_status": {
       "instance": {
@@ -131,7 +158,8 @@
       },
       "path": [
         "http_status"
-      ]
+      ],
+      "keyword": "type"
     },
     "dry_run_with_status": {
       "instance": {
@@ -151,7 +179,8 @@
       },
       "path": [
         "http_status"
-      ]
+      ],
+      "keyword": "type"
     },
     "dry_run_without_rendered": {
       "instance": {
@@ -166,7 +195,8 @@
         "dedupe_key": null,
         "warnings": []
       },
-      "path": []
+      "path": [],
+      "keyword": "required"
     },
     "wrong_tool": {
       "instance": {
@@ -183,7 +213,8 @@
       },
       "path": [
         "tool"
-      ]
+      ],
+      "keyword": "const"
     },
     "bad_level": {
       "instance": {
@@ -200,7 +231,8 @@
       },
       "path": [
         "level"
-      ]
+      ],
+      "keyword": "enum"
     },
     "negative_bytes": {
       "instance": {
@@ -217,7 +249,8 @@
       },
       "path": [
         "bytes"
-      ]
+      ],
+      "keyword": "minimum"
     },
     "status_range": {
       "instance": {
@@ -234,7 +267,8 @@
       },
       "path": [
         "http_status"
-      ]
+      ],
+      "keyword": "maximum"
     },
     "unknown_warning": {
       "instance": {
@@ -254,7 +288,8 @@
       "path": [
         "warnings",
         0
-      ]
+      ],
+      "keyword": "enum"
     },
     "duplicate_warning": {
       "instance": {
@@ -274,7 +309,8 @@
       },
       "path": [
         "warnings"
-      ]
+      ],
+      "keyword": "uniqueItems"
     },
     "empty_dedupe_key": {
       "instance": {
@@ -291,7 +327,8 @@
       },
       "path": [
         "dedupe_key"
-      ]
+      ],
+      "keyword": "minLength"
     },
     "rendered_without_message": {
       "instance": {
@@ -311,7 +348,8 @@
       },
       "path": [
         "rendered"
-      ]
+      ],
+      "keyword": "required"
     },
     "rendered_extra_key": {
       "instance": {
@@ -332,7 +370,8 @@
       },
       "path": [
         "rendered"
-      ]
+      ],
+      "keyword": "additionalProperties"
     },
     "extra_key": {
       "instance": {
@@ -348,7 +387,143 @@
         "warnings": [],
         "url": "https://x"
       },
-      "path": []
+      "path": [],
+      "keyword": "additionalProperties"
+    },
+    "rendered_data_extra_key": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "rendered": {
+          "title": "WARN: t",
+          "message": "m",
+          "data": {
+            "tag": "awkit-0123456789abcdef01234567",
+            "priority": "high"
+          }
+        }
+      },
+      "path": [
+        "rendered",
+        "data"
+      ],
+      "keyword": "additionalProperties"
+    },
+    "rendered_tag_not_awkit": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "rendered": {
+          "title": "WARN: t",
+          "message": "m",
+          "data": {
+            "tag": "x"
+          }
+        }
+      },
+      "path": [
+        "rendered",
+        "data",
+        "tag"
+      ],
+      "keyword": "pattern"
+    },
+    "rendered_tag_uppercase_hex": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "rendered": {
+          "title": "WARN: t",
+          "message": "m",
+          "data": {
+            "tag": "awkit-0123456789ABCDEF01234567"
+          }
+        }
+      },
+      "path": [
+        "rendered",
+        "data",
+        "tag"
+      ],
+      "keyword": "pattern"
+    },
+    "rendered_tag_short": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "rendered": {
+          "title": "WARN: t",
+          "message": "m",
+          "data": {
+            "tag": "awkit-0123"
+          }
+        }
+      },
+      "path": [
+        "rendered",
+        "data",
+        "tag"
+      ],
+      "keyword": "pattern"
+    },
+    "rendered_tag_trailing_lf": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "rendered": {
+          "title": "WARN: t",
+          "message": "m",
+          "data": {
+            "tag": "awkit-0123456789abcdef01234567\n"
+          }
+        }
+      },
+      "path": [
+        "rendered",
+        "data",
+        "tag"
+      ],
+      "keyword": "pattern"
     }
   }
 }

@@ -28,6 +28,24 @@
     "durations": {
       "timeout": "500ms",
       "connect_timeout": 1.5
+    },
+    "base_url_ipv6": {
+      "base_url": "https://[::1]:8123"
+    },
+    "base_url_uppercase_scheme": {
+      "base_url": "HTTPS://ha.example"
+    },
+    "base_url_trailing_slash": {
+      "base_url": "https://ha.example/"
+    },
+    "base_url_port_max": {
+      "base_url": "https://ha.example:65535/prefix"
+    },
+    "base_url_port_min": {
+      "base_url": "https://ha.example:1"
+    },
+    "base_url_port_leading_zeros": {
+      "base_url": "https://ha.example:00080"
     }
   },
   "invalid": {
@@ -37,7 +55,8 @@
       },
       "path": [
         "token_env"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "token_env_not_ha": {
       "instance": {
@@ -45,7 +64,8 @@
       },
       "path": [
         "token_env"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "token_env_lowercase": {
       "instance": {
@@ -53,7 +73,8 @@
       },
       "path": [
         "token_env"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "default_group_trailing_lf": {
       "instance": {
@@ -61,7 +82,8 @@
       },
       "path": [
         "default_group"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "default_group_space": {
       "instance": {
@@ -69,7 +91,8 @@
       },
       "path": [
         "default_group"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "default_group_empty": {
       "instance": {
@@ -77,7 +100,8 @@
       },
       "path": [
         "default_group"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "service_trailing_lf": {
       "instance": {
@@ -85,7 +109,8 @@
       },
       "path": [
         "service"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "service_uppercase": {
       "instance": {
@@ -93,7 +118,8 @@
       },
       "path": [
         "service"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "base_url_ftp": {
       "instance": {
@@ -101,7 +127,8 @@
       },
       "path": [
         "base_url"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "base_url_trailing_lf": {
       "instance": {
@@ -109,7 +136,8 @@
       },
       "path": [
         "base_url"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "base_url_userinfo": {
       "instance": {
@@ -117,7 +145,8 @@
       },
       "path": [
         "base_url"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "base_url_query": {
       "instance": {
@@ -125,7 +154,8 @@
       },
       "path": [
         "base_url"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "base_url_dot_segment": {
       "instance": {
@@ -133,7 +163,8 @@
       },
       "path": [
         "base_url"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "http_without_opt_in": {
       "instance": {
@@ -141,7 +172,8 @@
       },
       "path": [
         "base_url"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "ca_file_relative": {
       "instance": {
@@ -149,7 +181,8 @@
       },
       "path": [
         "ca_file"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "ca_file_tilde": {
       "instance": {
@@ -157,7 +190,8 @@
       },
       "path": [
         "ca_file"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "link_hosts_single_label": {
       "instance": {
@@ -168,7 +202,8 @@
       "path": [
         "link_hosts",
         0
-      ]
+      ],
+      "keyword": "pattern"
     },
     "link_hosts_empty": {
       "instance": {
@@ -176,7 +211,8 @@
       },
       "path": [
         "link_hosts"
-      ]
+      ],
+      "keyword": "minItems"
     },
     "link_hosts_leading_dot": {
       "instance": {
@@ -187,7 +223,8 @@
       "path": [
         "link_hosts",
         0
-      ]
+      ],
+      "keyword": "pattern"
     },
     "level_prefix_too_long": {
       "instance": {
@@ -198,7 +235,8 @@
       "path": [
         "level_prefix",
         "info"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "level_prefix_newline": {
       "instance": {
@@ -209,7 +247,8 @@
       "path": [
         "level_prefix",
         "warn"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "level_prefix_unknown_level": {
       "instance": {
@@ -219,7 +258,8 @@
       },
       "path": [
         "level_prefix"
-      ]
+      ],
+      "keyword": "additionalProperties"
     },
     "max_chars_low": {
       "instance": {
@@ -227,7 +267,8 @@
       },
       "path": [
         "max_chars"
-      ]
+      ],
+      "keyword": "minimum"
     },
     "max_chars_high": {
       "instance": {
@@ -235,7 +276,8 @@
       },
       "path": [
         "max_chars"
-      ]
+      ],
+      "keyword": "maximum"
     },
     "max_chars_string": {
       "instance": {
@@ -243,7 +285,8 @@
       },
       "path": [
         "max_chars"
-      ]
+      ],
+      "keyword": "type"
     },
     "timeout_bad_unit": {
       "instance": {
@@ -251,7 +294,8 @@
       },
       "path": [
         "timeout"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "timeout_trailing_lf": {
       "instance": {
@@ -259,7 +303,8 @@
       },
       "path": [
         "timeout"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "timeout_negative": {
       "instance": {
@@ -267,7 +312,8 @@
       },
       "path": [
         "timeout"
-      ]
+      ],
+      "keyword": "minimum"
     },
     "timeout_bool": {
       "instance": {
@@ -275,7 +321,8 @@
       },
       "path": [
         "timeout"
-      ]
+      ],
+      "keyword": "type"
     },
     "enabled_string": {
       "instance": {
@@ -283,7 +330,8 @@
       },
       "path": [
         "enabled"
-      ]
+      ],
+      "keyword": "type"
     },
     "log_string": {
       "instance": {
@@ -291,13 +339,224 @@
       },
       "path": [
         "log"
-      ]
+      ],
+      "keyword": "type"
     },
     "unknown_key": {
       "instance": {
         "token": "secret"
       },
-      "path": []
+      "path": [],
+      "keyword": "additionalProperties"
+    },
+    "base_url_port_zero": {
+      "instance": {
+        "base_url": "https://ha.example:0"
+      },
+      "path": [
+        "base_url"
+      ],
+      "keyword": "pattern"
+    },
+    "base_url_port_zeros": {
+      "instance": {
+        "base_url": "https://ha.example:00000"
+      },
+      "path": [
+        "base_url"
+      ],
+      "keyword": "pattern"
+    },
+    "base_url_port_65536": {
+      "instance": {
+        "base_url": "https://ha.example:65536"
+      },
+      "path": [
+        "base_url"
+      ],
+      "keyword": "pattern"
+    },
+    "base_url_port_99999": {
+      "instance": {
+        "base_url": "https://ha.example:99999"
+      },
+      "path": [
+        "base_url"
+      ],
+      "keyword": "pattern"
+    },
+    "base_url_port_six_digits": {
+      "instance": {
+        "base_url": "https://ha.example:000080"
+      },
+      "path": [
+        "base_url"
+      ],
+      "keyword": "pattern"
+    },
+    "base_url_port_empty": {
+      "instance": {
+        "base_url": "https://ha.example:"
+      },
+      "path": [
+        "base_url"
+      ],
+      "keyword": "pattern"
+    },
+    "base_url_port_not_digits": {
+      "instance": {
+        "base_url": "https://ha.example:abc"
+      },
+      "path": [
+        "base_url"
+      ],
+      "keyword": "pattern"
+    },
+    "base_url_too_long": {
+      "instance": {
+        "base_url": "https://ha.example/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "path": [
+        "base_url"
+      ],
+      "keyword": "maxLength"
+    },
+    "http_with_opt_in_false": {
+      "instance": {
+        "allow_insecure_http": false,
+        "base_url": "http://ha.example"
+      },
+      "path": [
+        "base_url"
+      ],
+      "keyword": "pattern"
+    },
+    "level_prefix_action_newline": {
+      "instance": {
+        "level_prefix": {
+          "action": "A\nB"
+        }
+      },
+      "path": [
+        "level_prefix",
+        "action"
+      ],
+      "keyword": "pattern"
+    },
+    "level_prefix_error_newline": {
+      "instance": {
+        "level_prefix": {
+          "error": "A\nB"
+        }
+      },
+      "path": [
+        "level_prefix",
+        "error"
+      ],
+      "keyword": "pattern"
+    },
+    "level_prefix_action_too_long": {
+      "instance": {
+        "level_prefix": {
+          "action": "xxxxxxxxxxxxxxxxx"
+        }
+      },
+      "path": [
+        "level_prefix",
+        "action"
+      ],
+      "keyword": "pattern"
+    },
+    "level_prefix_error_too_long": {
+      "instance": {
+        "level_prefix": {
+          "error": "xxxxxxxxxxxxxxxxx"
+        }
+      },
+      "path": [
+        "level_prefix",
+        "error"
+      ],
+      "keyword": "pattern"
+    },
+    "level_prefix_info_trailing_lf": {
+      "instance": {
+        "level_prefix": {
+          "info": "x\n"
+        }
+      },
+      "path": [
+        "level_prefix",
+        "info"
+      ],
+      "keyword": "pattern"
+    },
+    "link_hosts_entry_too_long": {
+      "instance": {
+        "link_hosts": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      },
+      "path": [
+        "link_hosts",
+        0
+      ],
+      "keyword": "maxLength"
+    },
+    "link_hosts_too_many": {
+      "instance": {
+        "link_hosts": [
+          "h0.example.com",
+          "h1.example.com",
+          "h2.example.com",
+          "h3.example.com",
+          "h4.example.com",
+          "h5.example.com",
+          "h6.example.com",
+          "h7.example.com",
+          "h8.example.com",
+          "h9.example.com",
+          "h10.example.com",
+          "h11.example.com",
+          "h12.example.com",
+          "h13.example.com",
+          "h14.example.com",
+          "h15.example.com",
+          "h16.example.com",
+          "h17.example.com",
+          "h18.example.com",
+          "h19.example.com",
+          "h20.example.com",
+          "h21.example.com",
+          "h22.example.com",
+          "h23.example.com",
+          "h24.example.com",
+          "h25.example.com",
+          "h26.example.com",
+          "h27.example.com",
+          "h28.example.com",
+          "h29.example.com",
+          "h30.example.com",
+          "h31.example.com",
+          "h32.example.com"
+        ]
+      },
+      "path": [
+        "link_hosts"
+      ],
+      "keyword": "maxItems"
+    },
+    "link_hosts_trailing_lf": {
+      "instance": {
+        "link_hosts": [
+          "example.com\n"
+        ]
+      },
+      "path": [
+        "link_hosts",
+        0
+      ],
+      "keyword": "pattern"
     }
   }
 }

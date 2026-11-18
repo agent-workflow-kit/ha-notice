@@ -76,12 +76,115 @@
         "retryable": false,
         "unknown_outcome": false
       }
+    },
+    "link_invalid_hosts": {
+      "error": {
+        "code": "refused",
+        "message": "m",
+        "reason": "link_invalid",
+        "details": {
+          "pointer": "/link"
+        },
+        "retryable": null,
+        "unknown_outcome": null
+      }
+    },
+    "link_invalid_rule": {
+      "error": {
+        "code": "refused",
+        "message": "m",
+        "reason": "link_invalid",
+        "details": null,
+        "retryable": null,
+        "unknown_outcome": null
+      }
+    },
+    "credential_invalid": {
+      "error": {
+        "code": "credential_invalid",
+        "message": "m",
+        "retryable": false,
+        "unknown_outcome": false,
+        "details": {
+          "env": "HA_TOKEN"
+        }
+      }
+    },
+    "host_rejected": {
+      "error": {
+        "code": "host_rejected",
+        "message": "m",
+        "retryable": false,
+        "unknown_outcome": false,
+        "details": {
+          "http_status": 400,
+          "hint": "check the notify service name and the message; run validate --test-message"
+        }
+      }
+    },
+    "auth_required": {
+      "error": {
+        "code": "auth_required",
+        "message": "m",
+        "retryable": false,
+        "unknown_outcome": false,
+        "details": {
+          "http_status": 401
+        }
+      }
+    },
+    "network_error": {
+      "error": {
+        "code": "network_error",
+        "message": "m",
+        "retryable": true,
+        "unknown_outcome": false,
+        "details": {
+          "tls": false,
+          "timeout": true
+        }
+      }
+    },
+    "network_error_tls": {
+      "error": {
+        "code": "network_error",
+        "message": "m",
+        "retryable": false,
+        "unknown_outcome": false,
+        "details": {
+          "tls": true,
+          "timeout": false
+        }
+      }
+    },
+    "upstream_error": {
+      "error": {
+        "code": "upstream_error",
+        "message": "m",
+        "retryable": true,
+        "unknown_outcome": true,
+        "details": {
+          "http_status": 503
+        }
+      }
+    },
+    "wrong_host_response": {
+      "error": {
+        "code": "wrong_host_response",
+        "message": "m",
+        "retryable": false,
+        "unknown_outcome": false,
+        "details": {
+          "http_status": 404
+        }
+      }
     }
   },
   "invalid": {
     "no_error_key": {
       "instance": {},
-      "path": []
+      "path": [],
+      "keyword": "required"
     },
     "extra_top_key": {
       "instance": {
@@ -95,7 +198,8 @@
         },
         "ok": false
       },
-      "path": []
+      "path": [],
+      "keyword": "additionalProperties"
     },
     "unknown_code": {
       "instance": {
@@ -107,7 +211,8 @@
       "path": [
         "error",
         "code"
-      ]
+      ],
+      "keyword": "enum"
     },
     "no_message": {
       "instance": {
@@ -117,7 +222,8 @@
       },
       "path": [
         "error"
-      ]
+      ],
+      "keyword": "required"
     },
     "extra_error_key": {
       "instance": {
@@ -129,41 +235,50 @@
       },
       "path": [
         "error"
-      ]
+      ],
+      "keyword": "additionalProperties"
     },
     "reason_unknown": {
       "instance": {
         "error": {
           "code": "refused",
           "message": "m",
-          "reason": "nope"
+          "reason": "nope",
+          "retryable": null,
+          "unknown_outcome": null
         }
       },
       "path": [
         "error",
         "reason"
-      ]
+      ],
+      "keyword": "enum"
     },
     "details_extra_key": {
       "instance": {
         "error": {
           "code": "usage",
-          "message": "m",
+          "message": "bad flag",
+          "reason": null,
           "details": {
             "url": "x"
-          }
+          },
+          "retryable": null,
+          "unknown_outcome": null
         }
       },
       "path": [
         "error",
         "details"
-      ]
+      ],
+      "keyword": "additionalProperties"
     },
     "pointer_bad": {
       "instance": {
         "error": {
           "code": "refused",
           "message": "m",
+          "reason": "invalid_payload",
           "details": {
             "pointer": "/a b"
           }
@@ -171,14 +286,17 @@
       },
       "path": [
         "error",
-        "details"
-      ]
+        "details",
+        "pointer"
+      ],
+      "keyword": "pattern"
     },
     "pointer_trailing_lf": {
       "instance": {
         "error": {
           "code": "refused",
           "message": "m",
+          "reason": "invalid_payload",
           "details": {
             "pointer": "/a\n"
           }
@@ -186,15 +304,17 @@
       },
       "path": [
         "error",
-        "details"
-      ]
+        "details",
+        "pointer"
+      ],
+      "keyword": "pattern"
     },
     "status_range": {
       "instance": {
         "error": {
           "code": "upstream_error",
           "message": "m",
-          "retryable": false,
+          "retryable": true,
           "unknown_outcome": true,
           "details": {
             "http_status": 99
@@ -203,8 +323,10 @@
       },
       "path": [
         "error",
-        "details"
-      ]
+        "details",
+        "http_status"
+      ],
+      "keyword": "minimum"
     },
     "phase_other": {
       "instance": {
@@ -220,32 +342,44 @@
       },
       "path": [
         "error",
-        "details"
-      ]
+        "details",
+        "phase"
+      ],
+      "keyword": "const"
     },
     "exit12_without_flags": {
       "instance": {
         "error": {
           "code": "network_error",
-          "message": "m"
+          "message": "m",
+          "unknown_outcome": false,
+          "details": {
+            "tls": false,
+            "timeout": true
+          }
         }
       },
       "path": [
         "error"
-      ]
+      ],
+      "keyword": "required"
     },
     "usage_with_retryable_true": {
       "instance": {
         "error": {
           "code": "usage",
-          "message": "m",
-          "retryable": true
+          "message": "bad flag",
+          "reason": null,
+          "details": null,
+          "retryable": true,
+          "unknown_outcome": null
         }
       },
       "path": [
         "error",
         "retryable"
-      ]
+      ],
+      "keyword": "type"
     },
     "auth_retryable": {
       "instance": {
@@ -253,13 +387,17 @@
           "code": "auth_required",
           "message": "m",
           "retryable": true,
-          "unknown_outcome": false
+          "unknown_outcome": false,
+          "details": {
+            "http_status": 401
+          }
         }
       },
       "path": [
         "error",
         "retryable"
-      ]
+      ],
+      "keyword": "const"
     },
     "rate_limited_not_retryable": {
       "instance": {
@@ -267,13 +405,18 @@
           "code": "rate_limited",
           "message": "m",
           "retryable": false,
-          "unknown_outcome": false
+          "unknown_outcome": false,
+          "retry_after_s": 2,
+          "details": {
+            "http_status": 429
+          }
         }
       },
       "path": [
         "error",
         "retryable"
-      ]
+      ],
+      "keyword": "const"
     },
     "unavailable_without_phase": {
       "instance": {
@@ -286,7 +429,8 @@
       },
       "path": [
         "error"
-      ]
+      ],
+      "keyword": "required"
     },
     "internal_retryable": {
       "instance": {
@@ -300,7 +444,8 @@
       "path": [
         "error",
         "retryable"
-      ]
+      ],
+      "keyword": "const"
     },
     "retry_after_negative": {
       "instance": {
@@ -309,13 +454,178 @@
           "message": "m",
           "retryable": true,
           "unknown_outcome": false,
-          "retry_after_s": -1
+          "retry_after_s": -1,
+          "details": {
+            "http_status": 429
+          }
         }
       },
       "path": [
         "error",
         "retry_after_s"
-      ]
+      ],
+      "keyword": "minimum"
+    },
+    "rate_limited_without_retry_after": {
+      "instance": {
+        "error": {
+          "code": "rate_limited",
+          "message": "m",
+          "retryable": true,
+          "unknown_outcome": false,
+          "details": {
+            "http_status": 429
+          }
+        }
+      },
+      "path": [
+        "error"
+      ],
+      "keyword": "required"
+    },
+    "rate_limited_without_status": {
+      "instance": {
+        "error": {
+          "code": "rate_limited",
+          "message": "m",
+          "retryable": true,
+          "unknown_outcome": false,
+          "retry_after_s": 2
+        }
+      },
+      "path": [
+        "error"
+      ],
+      "keyword": "required"
+    },
+    "upstream_error_without_status": {
+      "instance": {
+        "error": {
+          "code": "upstream_error",
+          "message": "m",
+          "retryable": true,
+          "unknown_outcome": true
+        }
+      },
+      "path": [
+        "error"
+      ],
+      "keyword": "required"
+    },
+    "wrong_host_response_without_status": {
+      "instance": {
+        "error": {
+          "code": "wrong_host_response",
+          "message": "m",
+          "retryable": false,
+          "unknown_outcome": false
+        }
+      },
+      "path": [
+        "error"
+      ],
+      "keyword": "required"
+    },
+    "auth_required_without_status": {
+      "instance": {
+        "error": {
+          "code": "auth_required",
+          "message": "m",
+          "retryable": false,
+          "unknown_outcome": false
+        }
+      },
+      "path": [
+        "error"
+      ],
+      "keyword": "required"
+    },
+    "host_rejected_without_status": {
+      "instance": {
+        "error": {
+          "code": "host_rejected",
+          "message": "m",
+          "retryable": false,
+          "unknown_outcome": false
+        }
+      },
+      "path": [
+        "error"
+      ],
+      "keyword": "required"
+    },
+    "upstream_error_details_empty": {
+      "instance": {
+        "error": {
+          "code": "upstream_error",
+          "message": "m",
+          "retryable": true,
+          "unknown_outcome": true,
+          "details": {}
+        }
+      },
+      "path": [
+        "error",
+        "details"
+      ],
+      "keyword": "required"
+    },
+    "link_invalid_other_pointer": {
+      "instance": {
+        "error": {
+          "code": "refused",
+          "message": "m",
+          "reason": "link_invalid",
+          "details": {
+            "pointer": "/title"
+          },
+          "retryable": null,
+          "unknown_outcome": null
+        }
+      },
+      "path": [
+        "error",
+        "details",
+        "pointer"
+      ],
+      "keyword": "const"
+    },
+    "link_invalid_empty_pointer": {
+      "instance": {
+        "error": {
+          "code": "refused",
+          "message": "m",
+          "reason": "link_invalid",
+          "details": {
+            "pointer": ""
+          },
+          "retryable": null,
+          "unknown_outcome": null
+        }
+      },
+      "path": [
+        "error",
+        "details",
+        "pointer"
+      ],
+      "keyword": "const"
+    },
+    "link_invalid_empty_details": {
+      "instance": {
+        "error": {
+          "code": "refused",
+          "message": "m",
+          "reason": "link_invalid",
+          "details": {},
+          "retryable": null,
+          "unknown_outcome": null
+        }
+      },
+      "path": [
+        "error",
+        "details"
+      ],
+      "keyword": "required"
     }
   }
 }

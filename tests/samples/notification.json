@@ -24,18 +24,21 @@
       "instance": {
         "title": "x"
       },
-      "path": []
+      "path": [],
+      "keyword": "required"
     },
     "empty_object": {
       "instance": {},
-      "path": []
+      "path": [],
+      "keyword": "required"
     },
     "unknown_field": {
       "instance": {
         "message": "m",
         "data": {}
       },
-      "path": []
+      "path": [],
+      "keyword": "additionalProperties"
     },
     "bad_level": {
       "instance": {
@@ -44,7 +47,8 @@
       },
       "path": [
         "level"
-      ]
+      ],
+      "keyword": "enum"
     },
     "level_case": {
       "instance": {
@@ -53,7 +57,8 @@
       },
       "path": [
         "level"
-      ]
+      ],
+      "keyword": "enum"
     },
     "message_not_string": {
       "instance": {
@@ -61,7 +66,8 @@
       },
       "path": [
         "message"
-      ]
+      ],
+      "keyword": "type"
     },
     "message_too_long": {
       "instance": {
@@ -69,7 +75,8 @@
       },
       "path": [
         "message"
-      ]
+      ],
+      "keyword": "maxLength"
     },
     "title_too_long": {
       "instance": {
@@ -78,7 +85,8 @@
       },
       "path": [
         "title"
-      ]
+      ],
+      "keyword": "maxLength"
     },
     "link_trailing_lf": {
       "instance": {
@@ -87,7 +95,8 @@
       },
       "path": [
         "link"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "link_space": {
       "instance": {
@@ -96,7 +105,8 @@
       },
       "path": [
         "link"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "link_non_ascii": {
       "instance": {
@@ -105,7 +115,8 @@
       },
       "path": [
         "link"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "link_too_long": {
       "instance": {
@@ -114,7 +125,8 @@
       },
       "path": [
         "link"
-      ]
+      ],
+      "keyword": "maxLength"
     },
     "link_empty": {
       "instance": {
@@ -123,13 +135,15 @@
       },
       "path": [
         "link"
-      ]
+      ],
+      "keyword": "pattern"
     },
     "not_an_object": {
       "instance": [
         "message"
       ],
-      "path": []
+      "path": [],
+      "keyword": "type"
     }
   }
 }

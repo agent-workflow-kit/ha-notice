@@ -73,12 +73,53 @@ def test_golden_missing_file_fails_and_does_not_create_it(tmp_path: Path) -> Non
     assert not (tmp_path / "log" / "new.jsonl").exists()
 
 
-def test_golden_update_writes_the_file_exactly(tmp_path: Path) -> None:
+def test_golden_update_rewrites_an_existing_file_exactly(tmp_path: Path) -> None:
+    (tmp_path / "log" / "d").mkdir(parents=True)
+    (tmp_path / "log" / "d" / "new.jsonl").write_text("old\n", encoding="utf-8")
     g = Golden(root=tmp_path, update=True, env={})
     g.check("log", "d/new.jsonl", "ünï\r\n{}\n")
     assert (tmp_path / "log" / "d" / "new.jsonl").read_bytes() == "ünï\r\n{}\n".encode()
     # and a second, non-update run now matches
     Golden(root=tmp_path, update=False).check("log", "d/new.jsonl", "ünï\r\n{}\n")
+
+
+def test_golden_update_does_not_create_a_missing_file(tmp_path: Path) -> None:
+    (tmp_path / "log").mkdir()
+    g = Golden(root=tmp_path, update=True, env={})
+    with pytest.raises(GoldenError, match="by hand"):
+        g.check("log", "new.jsonl", "{}\n")
+    assert not (tmp_path / "log" / "new.jsonl").exists()
+
+
+def test_golden_update_does_not_create_missing_directories(tmp_path: Path) -> None:
+    g = Golden(root=tmp_path, update=True, env={})
+    with pytest.raises(GoldenError, match="by hand"):
+        g.check("log", "d/new.jsonl", "{}\n")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_golden_update_leaves_the_file_untouched_when_the_text_cannot_be_encoded(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "output").mkdir()
+    target = tmp_path / "output" / "a.json"
+    target.write_text("keep\n", encoding="utf-8")
+    g = Golden(root=tmp_path, update=True, env={})
+    with pytest.raises(UnicodeEncodeError):
+        g.check("output", "a.json", "\ud800")  # a lone surrogate has no UTF-8 encoding
+    assert target.read_text(encoding="utf-8") == "keep\n"
+    assert [p.name for p in (tmp_path / "output").iterdir()] == ["a.json"]
+
+
+def test_golden_update_replaces_atomically_and_leaves_no_temp_file(tmp_path: Path) -> None:
+    (tmp_path / "output").mkdir()
+    target = tmp_path / "output" / "a.json"
+    target.write_text("old\n", encoding="utf-8")
+    inode_before = target.stat().st_ino
+    Golden(root=tmp_path, update=True, env={}).check("output", "a.json", "new\n")
+    assert target.read_text(encoding="utf-8") == "new\n"
+    assert target.stat().st_ino != inode_before  # a new file renamed over it, not rewritten
+    assert [p.name for p in (tmp_path / "output").iterdir()] == ["a.json"]
 
 
 def test_golden_update_is_refused_in_ci(tmp_path: Path) -> None:
@@ -97,7 +138,30 @@ def test_golden_default_is_not_update_mode(tmp_path: Path) -> None:
     assert g.update is False
 
 
-@pytest.mark.parametrize("name", ["../x.json", "/etc/passwd", "a/../../x", "", "a\\b", "a\x00b"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "../x.json",
+        "/etc/passwd",
+        "a/../../x",
+        "",
+        "a\\b",
+        "a\x00b",
+        "A.json",  # uppercase: collides with a.json on a case-insensitive filesystem
+        "a b.json",
+        "a\tb.json",
+        "a\nb.json",
+        "a.json\n",
+        "a\x7fb.json",
+        ".hidden",
+        "a/.hidden",
+        "a.",
+        "a./b.json",
+        "a//b.json",
+        "a/ b",
+        "é.json",
+    ],
+)
 def test_golden_rejects_names_that_escape_the_root(tmp_path: Path, name: str) -> None:
     g = Golden(root=tmp_path, update=False)
     with pytest.raises(ValueError):
@@ -151,3 +215,96 @@ def test_golden_schema_check_refuses_text_that_is_not_json(tmp_path: Path) -> No
     g = Golden(root=tmp_path, update=False)
     with pytest.raises(GoldenError, match="JSON"):
         g.check("output", "a.json", "not json", schema="cli/send")
+
+
+def _symlink_setup(tmp_path: Path) -> tuple[Path, Path]:
+    root = tmp_path / "golden"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    return root, outside
+
+
+@pytest.mark.parametrize("update", [False, True])
+def test_golden_rejects_a_symlinked_directory_component(tmp_path: Path, update: bool) -> None:
+    root, outside = _symlink_setup(tmp_path)
+    (outside / "a.json").write_text("{}\n", encoding="utf-8")
+    (root / "output").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        Golden(root=root, update=update, env={}).check("output", "a.json", "{}\n")
+    assert (outside / "a.json").read_text(encoding="utf-8") == "{}\n"
+
+
+@pytest.mark.parametrize("update", [False, True])
+def test_golden_rejects_a_symlinked_subdirectory_component(tmp_path: Path, update: bool) -> None:
+    root, outside = _symlink_setup(tmp_path)
+    (root / "log").mkdir()
+    (outside / "x.jsonl").write_text("{}\n", encoding="utf-8")
+    (root / "log" / "d").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        Golden(root=root, update=update, env={}).check("log", "d/x.jsonl", "{}\n")
+
+
+def test_golden_update_does_not_write_through_a_symlinked_file(tmp_path: Path) -> None:
+    root, outside = _symlink_setup(tmp_path)
+    (root / "output").mkdir()
+    (outside / "t.json").write_text("keep\n", encoding="utf-8")
+    (root / "output" / "a.json").symlink_to(outside / "t.json")
+    with pytest.raises(ValueError, match="symlink"):
+        Golden(root=root, update=True, env={}).check("output", "a.json", "new\n")
+    assert (outside / "t.json").read_text(encoding="utf-8") == "keep\n"
+
+
+def test_golden_rejects_a_symlinked_root_component_resolving_elsewhere(tmp_path: Path) -> None:
+    # The root itself may be reached through a symlink (tmp dirs often are); what matters is
+    # that nothing below it is one and that the resolved path stays under the resolved root.
+    real = tmp_path / "real"
+    (real / "output").mkdir(parents=True)
+    (real / "output" / "a.json").write_text("{}\n", encoding="utf-8")
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    Golden(root=link).check("output", "a.json", "{}\n")
+
+
+@pytest.mark.parametrize("update", [False, True])
+def test_golden_a_directory_named_like_the_file_is_not_a_golden(
+    tmp_path: Path, update: bool
+) -> None:
+    (tmp_path / "output" / "a.json").mkdir(parents=True)
+    with pytest.raises(GoldenError):
+        Golden(root=tmp_path, update=update, env={}).check("output", "a.json", "{}\n")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"a":1,"a":2}',  # duplicate key
+        '{"o":{"a":1,"a":2}}',  # duplicate key, nested
+        '{"a":NaN}',
+        '{"a":Infinity}',
+        '{"a":-Infinity}',
+        "",
+    ],
+)
+def test_golden_schema_check_rejects_non_strict_json(tmp_path: Path, text: str) -> None:
+    with pytest.raises(GoldenError, match="JSON"):
+        Golden(root=tmp_path).check("output", "a.json", text, schema="cli/send")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        '{"tool":"ha-notice"}',  # no final LF
+        '{"tool":"ha-notice"}\n\n',  # two final LFs
+        '\n{"tool":"ha-notice"}\n',  # leading blank line
+        '{"tool":"ha-notice"}\n\n{"tool":"ha-notice"}\n',  # blank line between records
+        '{"tool":"ha-notice"}\r\n',  # CR
+        '{"tool":"ha-notice"}\n{"tool":"ha-notice"}',  # last record without LF
+    ],
+)
+def test_golden_log_text_must_be_lf_terminated_records_without_blank_lines(
+    tmp_path: Path, text: str
+) -> None:
+    with pytest.raises(GoldenError, match="log"):
+        Golden(root=tmp_path).check("log", "x.jsonl", text, schema="defs")
