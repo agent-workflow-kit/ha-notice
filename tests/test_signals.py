@@ -389,6 +389,24 @@ def test_a_keyboard_interrupt_in_restore_yields_to_the_recorded_signal() -> None
         pass
 
 
+def test_a_restore_error_does_not_replace_a_recorded_signal() -> None:
+    class Failing(FakeGateway):
+        def install_signal_handlers(self, signals: Any, on_signal: Any) -> Any:
+            super().install_signal_handlers(signals, on_signal)
+
+            def restore() -> None:
+                raise OSError("restore failed")
+
+            return restore
+
+    state = SignalState()
+    with pytest.raises(SignalReceived) as raised, install(Failing(), state):
+        state.handler(signal.SIGTERM)
+    assert raised.value.code == 143
+    with pytest.raises(OSError), install(Failing(), SignalState()):
+        pass
+
+
 def _trace_signal_calls(monkeypatch: pytest.MonkeyPatch, fail_for: int | None = None) -> list[int]:
     calls: list[int] = []
     real = signal.signal

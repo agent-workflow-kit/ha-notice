@@ -69,6 +69,8 @@ def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
 
     TODO(#27): call ``inv.signals.check()`` immediately before the worker starts (step 6); pass
     ``stop=inv.signals.stopped`` to ``run_with_deadline`` and report the gate's result.
+    When the send reports a result, a result already reported wins over later signals: in the cli
+    ``except`` branch, call ``inv.signals.check()`` only if ``emitted_exit()`` is None.
     """
     inv.signals.check()
     return fail(inv.json, "internal", message="command not implemented")

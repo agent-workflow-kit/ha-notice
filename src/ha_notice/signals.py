@@ -100,6 +100,6 @@ def install(gateway: Gateway, state: SignalState) -> Iterator[SignalState]:
     finally:
         try:
             restore()
-        except KeyboardInterrupt:
-            state.check()  # a recorded signal's 128+N wins over the interrupt
+        except BaseException:
+            state.check()  # a recorded signal's 128+N wins over the restore error
             raise
