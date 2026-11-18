@@ -16,6 +16,7 @@ from ha_notice import config
 from ha_notice.config import ConfigError
 from ha_notice.gateway import Gateway
 from tests.fake_gateway import FakeGateway
+from tests.harness import schema_errors
 
 ROOT = Path(__file__).resolve().parent.parent
 FAKE_SECRET = "sk-FAKE-SECRET-0123456789"
@@ -233,17 +234,65 @@ def test_connect_timeout_longer_than_timeout_is_not_refused(gw: FakeGateway, hom
     assert (cfg.timeout, cfg.connect_timeout) == (1.0, 30.0)
 
 
-def test_the_error_never_contains_the_value(gw: FakeGateway, home: Path) -> None:
-    write(home, f"timeout: '{FAKE_SECRET}'\n")
+@pytest.mark.parametrize(
+    ("key_name", "text"),
+    [
+        ("timeout", f"timeout: '{FAKE_SECRET}'\n"),
+        ("connect_timeout", f"connect_timeout: '{FAKE_SECRET}'\n"),
+        ("default_group", f"default_group: '{FAKE_SECRET}!'\n"),
+        ("level_prefix", f"level_prefix: {{info: '{FAKE_SECRET}'}}\n"),
+        ("level_prefix", f"level_prefix: {{warn: '{FAKE_SECRET}'}}\n"),
+        ("level_prefix", f"level_prefix: {{action: '{FAKE_SECRET}'}}\n"),
+        ("level_prefix", f"level_prefix: {{error: '{FAKE_SECRET}'}}\n"),
+        ("level_prefix", f"level_prefix: {{info: 'x{FAKE_SECRET[:8]}  '}}\n"),
+        ("level_prefix", f'level_prefix: {{info: "{FAKE_SECRET[:8]}\\u200b"}}\n'),
+    ],
+)
+def test_the_error_never_contains_the_value(
+    gw: FakeGateway, home: Path, key_name: str, text: str
+) -> None:
+    write(home, text)
     err = fails(gw)
-    assert err.key == "timeout"
-    assert FAKE_SECRET not in repr(err.error) and FAKE_SECRET not in str(err)
+    assert err.key == key_name
+    for shown in (str(err), repr(err), repr(err.error), err.error.envelope["error"]["message"]):
+        assert FAKE_SECRET not in shown and FAKE_SECRET[:8] not in shown
+    assert FAKE_SECRET[:8] not in json.dumps(err.error.envelope["error"]["details"])
+
+
+def test_a_bare_float_is_read_as_a_binary_float_before_the_range_check(
+    gw: FakeGateway, home: Path
+) -> None:
+    # Documented: 120.0000000000000001 is the float 120.0 when bare, and exact when quoted.
+    assert loads(gw, home, "timeout: 120.0000000000000001\n").timeout == 120.0
+    write(home, "timeout: '120.0000000000000001'\n")
+    assert fails(gw).key == "timeout"
+
+
+def test_a_duration_string_is_capped_at_64_characters(gw: FakeGateway, home: Path) -> None:
+    at_cap = "1." + "0" * 62  # 64 characters, exactly 1 second
+    assert len(at_cap) == 64
+    assert loads(gw, home, f"timeout: '{at_cap}'\n").timeout == 1.0
+    write(home, f"timeout: '{at_cap}0'\n")
+    assert fails(gw).key == "timeout"
+    write(home, f"timeout: '{'1' + '0' * 64}'\n")
+    assert fails(gw).key == "timeout"
+
+
+def test_the_duration_cap_does_not_depend_on_the_int_conversion_limit(
+    gw: FakeGateway, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "get_int_max_str_digits", lambda: 4300, raising=False)
+    at_cap = "1." + "0" * 62
+    assert loads(gw, home, f"timeout: '{at_cap}'\n").timeout == 1.0
+    assert not config.duration_ok("timeout", "1" + "0" * 65)
 
 
 def test_the_duration_grammar_matches_the_schema() -> None:
     schema = json.loads((ROOT / "schemas" / "config.json").read_text(encoding="utf-8"))
     pattern = schema["$defs"]["duration"]["anyOf"][1]["pattern"]
-    for text in ["10", "10s", "1.5m", "500ms", "1e3", "10\n", "-1", "1h", ""]:
+    for text in ["10", "10s", "1.5m", "500ms", "1e3", "10\n", "-1", "1h", "", "010", "00s", "01.5"]:
         assert bool(re.fullmatch(pattern, text)) is bool(config.DURATION_RE.fullmatch(text))
 
 
@@ -389,7 +438,7 @@ def test_a_lone_surrogate_cannot_be_written_to_a_file(gw: FakeGateway, home: Pat
     # A \ud800 escape in YAML: the loader (or the sanitizer rule) refuses it either way.
     write(home, 'level_prefix: {info: "A\\ud800"}\n')
     err = fails(gw)
-    assert err.key in ("level_prefix", str(home / ".config" / "ha-notice" / "config.yaml"))
+    assert err.key == "level_prefix"
 
 
 @pytest.mark.parametrize("level", ["info", "warn", "action", "error"])
@@ -485,6 +534,7 @@ def test_boundary_values_load_and_validate_against_the_schema(
 ) -> None:
     write(home, text)
     config.load(gw, None)
+    assert schema_errors("config", yaml.safe_load(text)) == []
 
 
 def test_known_key_types_still_win_over_grammar(gw: FakeGateway, home: Path) -> None:

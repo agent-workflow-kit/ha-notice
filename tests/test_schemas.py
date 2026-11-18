@@ -202,4 +202,24 @@ def test_config_example_validates_against_the_config_schema() -> None:
     with (ROOT / "config.example.yaml").open(encoding="utf-8") as fh:
         example = yaml.safe_load(fh)
     assert [e.message for e in schema_errors("config", example)] == []
-    # TODO(#8): loading config.example.yaml with the stated defaults is tested in the config issue.
+    # Loading config.example.yaml with the stated defaults is tested in
+    # tests/test_config_keys.py::test_the_example_loads_with_the_stated_defaults.
+
+
+@pytest.mark.parametrize("key", ["timeout", "connect_timeout"])
+@pytest.mark.parametrize(
+    ("value", "ok"),
+    [
+        ("1s", True),
+        ("0.5s", True),
+        ("1000ms", True),
+        ("10", True),
+        ("0", True),
+        ("010", False),
+        ("01.5s", False),
+        ("00s", False),
+        ("10\n", False),
+    ],
+)
+def test_duration_string_samples(key: str, value: str, ok: bool) -> None:
+    assert (schema_errors("config", {key: value}) == []) is ok

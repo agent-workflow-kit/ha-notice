@@ -17,9 +17,10 @@ Rules kept here (docs/interface.md, Config):
   never kept, not even as ``__cause__``.
 - An unknown key is refused before its value is examined, by ``output.safe_key``.
 - The type of each known key is checked first, then its grammar and range (issue #9):
-  durations (``[0-9]+(\\.[0-9]+)?(ms|s|m)?`` or a finite number of seconds, compared exactly in
-  ``Fraction``s, so ``1e3``, ``1:30``, ``.nan`` and a bool are refused), ``level_prefix`` members
-  (at most 16 characters that the sanitizer's title rule leaves unchanged), ``default_group`` and
+  durations (``(0|[1-9][0-9]*)(\\.[0-9]+)?(ms|s|m)?`` of at most 64 characters, or a finite number
+  of seconds, compared exactly in ``Fraction``s, so ``1e3``, ``1:30``, ``.nan`` and a bool are
+  refused), ``level_prefix`` members (at most 16 characters that the sanitizer's title rule leaves
+  unchanged), ``default_group`` and
   ``max_chars``. Every pattern is a full match (``re.fullmatch``, never ``$``). The error names the
   key and never the value. TODO(#10): ``base_url``, ``token_env`` and ``ca_file`` grammars;
   TODO(#16): ``link_hosts``.
@@ -229,8 +230,9 @@ def _parse(raw: bytes) -> object:
 
 # --- grammar and range of the known keys (issue #9) ------------------------------------------
 
-# Narrower than the schema's ``[0-9]+``: no leading zero, so a quoted ``"010"`` is refused like the
-# bare ``010`` (which the loader leaves a string).
+# No leading zero, so a quoted ``"010"`` is refused like the bare ``010`` (which the loader leaves a
+# string). A string longer than DURATION_MAX_CHARS is refused, whatever the interpreter's limit.
+DURATION_MAX_CHARS = 64
 DURATION_RE = re.compile(r"((?:0|[1-9][0-9]*)(?:\.[0-9]+)?)(ms|s|m)?")
 GROUP_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _UNIT = {None: Fraction(1), "s": Fraction(1), "ms": Fraction(1, 1000), "m": Fraction(60)}
@@ -257,13 +259,10 @@ def _seconds(value: object) -> Fraction | None:
     if type(value) is float:
         return Fraction(value) if math.isfinite(value) else None
     if type(value) is str:
-        match = DURATION_RE.fullmatch(value)
+        match = DURATION_RE.fullmatch(value) if len(value) <= DURATION_MAX_CHARS else None
         if match is None:
             return None
-        try:
-            return Fraction(match.group(1)) * _UNIT[match.group(2)]
-        except ValueError:  # more digits than int() converts
-            return None
+        return Fraction(match.group(1)) * _UNIT[match.group(2)]
     return None
 
 

@@ -113,7 +113,8 @@
         },
         {
           "type": "string",
-          "pattern": "^[0-9]+(?:\\.[0-9]+)?(?:ms|s|m)?(?![\\s\\S])"
+          "maxLength": 64,
+          "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:ms|s|m)?(?![\\s\\S])"
         }
       ],
       "description": "A number of seconds or a string <number>(ms|s|m) with no unit meaning seconds. The range of each key is in its description and is checked by the tool."
