@@ -98,6 +98,7 @@ OVERRIDE_MESSAGES = frozenset(
         "text flags need --message",
         "unexpected --",
         "command not implemented",
+        "the --file source cannot be read",
     }
 )
 _KEY_RE = re.compile(r"[A-Za-z0-9_]{1,64}")
@@ -375,8 +376,9 @@ def emitted_exit() -> int | None:
 def record_emitted(exit_code: int) -> None:
     """Note that this invocation has printed its envelope (first call wins).
 
-    TODO(#27): every success printer (sent object, dry-run text, probe) must call
-    record_emitted(0) so a later exception cannot produce a second envelope.
+    TODO(#27): every remaining success printer (the sent object and the probe) must call
+    record_emitted(0) so a later exception cannot produce a second envelope. The dry run
+    already does.
     """
     if not _emitted:
         _emitted.append(exit_code)

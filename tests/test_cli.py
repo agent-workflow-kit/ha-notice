@@ -594,7 +594,7 @@ def test_commands_not_yet_implemented_fail_closed_as_internal(run: Any) -> None:
     assert code == 1
     assert _envelope(out)["error"]["code"] == "internal"
     assert err.startswith("internal: ")
-    assert run(["send", "--message=a"])[0] == 1
+    assert run(["validate"])[0] == 1
 
 
 # --- --version, --help ---------------------------------------------------------------------

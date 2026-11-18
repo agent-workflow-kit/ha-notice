@@ -24,7 +24,7 @@ The sanitizer (issue #13, docs/interface.md, Sanitizer) runs inside ``validate_n
 cut, the prefix and the budget are in ``render.py`` (issue #17).
 The command-keyword check (issue #14) runs last inside ``validate_notification``, on the sanitized
 message. The link rule (issue #15) is in ``link.py`` and runs before the message checks, followed
-by the ``link_hosts`` check (issue #16); the send flow passes ``Config.link_hosts`` (TODO(#27)).
+by the ``link_hosts`` check (issue #16); the send flow passes ``Config.link_hosts``.
 """
 
 from __future__ import annotations
@@ -194,7 +194,7 @@ def validate_notification(obj: object, link_hosts: Sequence[str] | None = None) 
 
     ``link_hosts`` is the validated config list (``None`` = unset, no restriction). When set, the
     link's host must match it, else ``PayloadError("link_invalid", "link")`` (pointer ``/link``);
-    an empty list allows no host. TODO(#27): the send flow passes ``Config.link_hosts``.
+    an empty list allows no host. The send flow passes ``Config.link_hosts`` (``send.py``).
     """
     if not isinstance(obj, Mapping):
         raise PayloadError("invalid_payload", None)
@@ -236,7 +236,12 @@ def validate_notification(obj: object, link_hosts: Sequence[str] | None = None) 
 
 
 def notification_from_flags(
-    *, title: str | None, message: str | None, level: str | None, link: str | None
+    *,
+    title: str | None,
+    message: str | None,
+    level: str | None,
+    link: str | None,
+    link_hosts: Sequence[str] | None = None,
 ) -> Notification:
     """The notification of the text flags, checked like the same JSON fields (same pointers). A
     flag that was not given is absent; a flag that was given empty is an empty string."""
@@ -250,7 +255,7 @@ def notification_from_flags(
         )
         if value is not None
     }
-    return validate_notification(given)
+    return validate_notification(given, link_hosts)
 
 
 # --- input reading and the hardened JSON parse (issue #12) ---------------------------------------
@@ -340,7 +345,7 @@ def hardened_loads(text: str) -> object:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def parse_notification(data: bytes) -> Notification:
+def parse_notification(data: bytes, link_hosts: Sequence[str] | None = None) -> Notification:
     """Decode and parse the bytes of one input and validate the notification.
 
     Strict UTF-8 (never the locale); a byte order mark is refused; any parse failure, a top level
@@ -360,14 +365,17 @@ def parse_notification(data: bytes) -> Notification:
         obj = _FAILED
     if obj is _FAILED:
         raise PayloadError("invalid_payload", None)
-    return validate_notification(obj)
+    return validate_notification(obj, link_hosts)
 
 
 _FAILED = object()
 
 
 def read_notification(
-    gateway: Gateway, source: int | str, remaining: Callable[[], float]
+    gateway: Gateway,
+    source: int | str,
+    remaining: Callable[[], float],
+    link_hosts: Sequence[str] | None = None,
 ) -> Notification:
     """Read one source (a descriptor such as 0, or a ``--file`` path) and return its notification.
 
@@ -388,4 +396,4 @@ def read_notification(
         raise InputTimeout
     if result.status == "too_large" or len(result.data) > INPUT_MAX:
         raise PayloadError("invalid_payload", None)
-    return parse_notification(result.data)
+    return parse_notification(result.data, link_hosts)
