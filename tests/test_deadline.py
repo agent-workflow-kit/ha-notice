@@ -685,6 +685,10 @@ def test_a_probe_deadline_is_not_an_unknown_outcome(real: RealClock) -> None:
         assert isinstance(spec, ErrorSpec) and spec.probe and not spec.unknown_outcome
 
 
+def _worker_alive() -> bool:
+    return any(t.name == dl.WORKER_NAME and t.is_alive() for t in threading.enumerate())
+
+
 def test_an_endless_100_continue_stream_is_outcome_unknown_at_the_deadline(
     real: RealClock,
 ) -> None:
@@ -720,7 +724,6 @@ def test_an_endless_100_continue_stream_is_outcome_unknown_at_the_deadline(
     parsed = parse_base_url(f"http://127.0.0.1:{listener.getsockname()[1]}")
     assert parsed is not None
     target = Target(parsed, TOKEN, "HA_TOKEN", None, 5.0, 5.0)
-    threads_before = threading.active_count()
     try:
 
         def attempt(before_write: Callable[[], None]) -> RawResponse:
@@ -741,6 +744,6 @@ def test_an_endless_100_continue_stream_is_outcome_unknown_at_the_deadline(
             conn.close()
         server.join(5)
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and threading.active_count() > threads_before:
+    while time.monotonic() < deadline and _worker_alive():
         time.sleep(0.01)  # the worker ends once its socket is closed
-    assert threading.active_count() <= threads_before
+    assert not _worker_alive()
