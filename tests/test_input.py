@@ -138,6 +138,47 @@ def test_moderate_integer_is_a_type_error_not_a_parse_error() -> None:
     assert err.value.pointer == "/message"
 
 
+def test_long_float_literal_is_parsed_and_fails_the_type_check() -> None:
+    data = b'{"message":0.' + b"0" * 5000 + b"1}"
+    err = pytest.raises(PayloadError, parse_notification, data)
+    assert err.value.pointer == "/message"
+
+
+def test_integer_limit_counts_digits_not_the_sign() -> None:
+    plus = pytest.raises(PayloadError, parse_notification, b'{"message":' + b"9" * 4300 + b"}")
+    minus = pytest.raises(PayloadError, parse_notification, b'{"message":-' + b"9" * 4300 + b"}")
+    assert plus.value.pointer == minus.value.pointer == "/message"
+    assert refused_pointer(b'{"message":-' + b"9" * 4301 + b"}") == ""
+    assert refused_pointer(b'{"message":' + b"9" * 4301 + b"}") == ""
+
+
+def nested(depth: int) -> str:
+    return "[" * depth + "]" * depth
+
+
+def test_nesting_depth_100_is_accepted_and_101_refused() -> None:
+    assert hardened_loads(nested(100)) is not None
+    with pytest.raises(ValueError):
+        hardened_loads(nested(101))
+    with pytest.raises(ValueError):
+        hardened_loads('{"a":' * 101 + "1" + "}" * 101)
+
+
+def test_brackets_in_strings_and_escaped_quotes_do_not_count() -> None:
+    values = ["[" * 500, "a\\", '"' + "[" * 500, '\\"' + "[" * 500]
+    assert hardened_loads(json.dumps(values)) == values
+    # 100 real levels around strings full of brackets are still accepted
+    deep = "[" * 100 + json.dumps("[" * 500) + "]" * 100
+    assert hardened_loads(deep) is not None
+
+
+def test_one_mebibyte_of_open_brackets_is_refused_fast() -> None:
+    started = time.monotonic()
+    with pytest.raises(ValueError):
+        hardened_loads("[" * INPUT_MAX)
+    assert time.monotonic() - started < 2
+
+
 def test_deep_nesting_is_refused_without_recursion_error() -> None:
     assert refused_pointer(b"[" * 100000 + b"]" * 100000) == ""
     assert refused_pointer(b'{"message":' + b"[" * 100000) == ""
@@ -356,12 +397,66 @@ def test_directory_fifo_and_dev_zero_are_source_errors(
 
 
 def test_closed_descriptor_is_empty_input(real: gw.RealGateway) -> None:
+    # A descriptor number that is certainly closed: a high number dup'd onto a pipe, then closed.
     r, w = os.pipe()
+    high = os.dup2(r, 900)
     os.close(r)
     os.close(w)
+    os.close(high)
     with pytest.raises(PayloadError) as info:
-        read_notification(real, r, real_remaining(5.0))
+        read_notification(real, high, real_remaining(5.0))
     assert info.value.pointer == ""
+
+
+def test_unreadable_descriptor_is_empty_input(tmp_path: Path, real: gw.RealGateway) -> None:
+    # A directory descriptor and a write-only descriptor: read fails, which is empty input.
+    dir_fd = os.open(tmp_path, os.O_RDONLY)
+    wo_fd = os.open(tmp_path / "wo", os.O_WRONLY | os.O_CREAT)
+    try:
+        for fd in (dir_fd, wo_fd):
+            with pytest.raises(PayloadError) as info:
+                read_notification(real, fd, real_remaining(5.0))
+            assert (info.value.reason, info.value.pointer) == ("invalid_payload", "")
+    finally:
+        os.close(dir_fd)
+        os.close(wo_fd)
+
+
+def test_source_error_of_a_descriptor_is_empty_input() -> None:
+    fake = FakeGateway()
+    fake.sources[0] = gw.SourceError("input cannot be read")
+    with pytest.raises(PayloadError) as info:
+        read_notification(fake, 0, fake_remaining(fake))
+    assert (info.value.reason, info.value.pointer) == ("invalid_payload", "")
+
+
+def test_read_source_error_does_not_chain_the_path(tmp_path: Path, real: gw.RealGateway) -> None:
+    secret = str(tmp_path / "SECRET-NAME" / "x")
+    with pytest.raises(gw.SourceError) as info:
+        real.read_source(secret, 10, real_remaining())
+    assert info.value.__cause__ is None
+    assert info.value.__context__ is None
+    with pytest.raises(gw.SourceError) as info:
+        real.read_source("bad\x00path", 10, real_remaining())
+    assert info.value.__cause__ is None
+    assert info.value.__context__ is None
+
+
+def test_path_is_opened_without_a_controlling_terminal(
+    tmp_path: Path, real: gw.RealGateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "n.json"
+    path.write_bytes(b"{}")
+    seen: list[int] = []
+    real_open = os.open
+
+    def spy(p: str, flags: int, *a: int, **k: int) -> int:
+        seen.append(flags)
+        return real_open(p, flags, *a, **k)
+
+    monkeypatch.setattr(os, "open", spy)
+    real.read_source(str(path), 10, real_remaining())
+    assert seen and all(f & os.O_NOCTTY for f in seen)
 
 
 def test_pipe_with_a_complete_notification(real: gw.RealGateway) -> None:

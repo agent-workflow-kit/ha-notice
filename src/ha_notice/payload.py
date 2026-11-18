@@ -32,12 +32,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ha_notice.gateway import Gateway
+from ha_notice.gateway import Gateway, SourceError
 from ha_notice.output import ErrorResult, build_error, safe_pointer
 
 INPUT_MAX = 1048576  # bytes read from one source (1 MiB)
 # The interpreter's default int limit, kept here so PYTHONINTMAXSTRDIGITS cannot lift it.
 INT_DIGITS_MAX = 4300
+DEPTH_MAX = 100  # nesting of arrays and objects accepted by hardened_loads
 TEXT_MAX = 100000  # characters of input for title and message
 LEVELS = ("info", "warn", "action", "error")  # ordered: info < warn < action < error
 DEFAULT_LEVEL = "info"
@@ -157,14 +158,12 @@ def _refuse_constant(_name: str) -> object:
 
 
 def _parse_int(text: str) -> int:
-    if len(text) > INT_DIGITS_MAX:
+    if len(text.lstrip("-")) > INT_DIGITS_MAX:  # digits only, as the interpreter counts
         raise ValueError("integer too long")
     return int(text)
 
 
 def _parse_float(text: str) -> float:
-    if len(text) > INT_DIGITS_MAX:
-        raise ValueError("number too long")
     value = float(text)
     if not math.isfinite(value):  # 1e999
         raise ValueError("number out of range")
@@ -178,12 +177,40 @@ def _no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return out
 
 
+def _too_deep(text: str) -> bool:
+    """Linear scan of the bracket nesting, outside strings, against ``DEPTH_MAX``. Done before the
+    decode because the C scanner can overflow a small C stack long before ``RecursionError``."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch in "[{":
+            depth += 1
+            if depth > DEPTH_MAX:
+                return True
+        elif ch in "]}":
+            depth -= 1
+    return False
+
+
 def hardened_loads(text: str) -> object:
     """Parse JSON text, refusing duplicate keys, NaN and Infinity (also by overflow such as
-    ``1e999``), integers and numbers over 4300 characters and nesting the interpreter cannot
-    recurse into. Every failure is a ``ValueError`` whose text is fixed (no input is echoed).
-    Also used for the Home Assistant response body.
+    ``1e999``), integers of more than 4300 digits, and nesting deeper than 100 levels (checked by
+    a linear pre-scan before the decode, so a small C stack cannot be overrun; a
+    ``RecursionError`` is still caught). Every failure is a ``ValueError`` whose text is fixed (no
+    input is echoed). Also used for the Home Assistant response body.
     """
+    if _too_deep(text):
+        raise ValueError("invalid JSON")
     decoder = json.JSONDecoder(
         object_pairs_hook=_no_duplicates,
         parse_constant=_refuse_constant,
@@ -234,9 +261,17 @@ def read_notification(
 
     Raises ``InputTimeout`` when the deadline passes first (also with partial data),
     ``PayloadError`` for anything refused (more than ``INPUT_MAX`` bytes included) and the
-    gateway's ``SourceError`` for a path that is missing, unreadable or not a regular file.
+    gateway's ``SourceError`` for a path that is missing, unreadable or not a regular file. An
+    unreadable descriptor (closed, a directory, write-only) is empty input: ``invalid_payload``.
     """
-    result = gateway.read_source(source, INPUT_MAX, remaining)
+    result = None
+    try:
+        result = gateway.read_source(source, INPUT_MAX, remaining)
+    except SourceError:
+        if isinstance(source, str):
+            raise
+    if result is None:  # an unreadable descriptor is empty input; raised outside the handler
+        raise PayloadError("invalid_payload", None)
     if result.status == "timeout":
         raise InputTimeout
     if result.status == "too_large" or len(result.data) > INPUT_MAX:

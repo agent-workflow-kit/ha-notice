@@ -423,10 +423,13 @@ class RealGateway:
 
     @staticmethod
     def _open_regular(path: str) -> int:
+        fd = -1
         try:
-            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOCTTY)
         except (OSError, ValueError):
-            raise SourceError("input file cannot be opened") from None
+            pass
+        if fd < 0:  # raised outside the handler: no context carries the path
+            raise SourceError("input file cannot be opened")
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise SourceError("input file is not a regular file")
