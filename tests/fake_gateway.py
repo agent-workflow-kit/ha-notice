@@ -13,6 +13,7 @@ that the test sets, with a hard cap so a broken test fails instead of hanging.
 from __future__ import annotations
 
 import http.client
+import os
 import re
 import threading
 from collections import deque
@@ -210,7 +211,7 @@ class FakeGateway:
     resolve_block: threading.Event | None = None
     resolve_delay: float = 0.0  # seconds the fake clock advances inside resolve()
     home: str | HomeLookupError = "/nonexistent-fake-home"
-    user_id: int = 1000
+    user_id: int = field(default_factory=lambda: os.getuid())
     login: str | None = "fakeuser"
     tty_fds: set[int] = field(default_factory=set)
     sources: dict[int | str, bytes | StallingSource | SourceError] = field(default_factory=dict)
@@ -301,7 +302,7 @@ class FakeGateway:
     def open_state_dir(self, home: str) -> int:
         if self.state_error is not None:
             raise self.state_error
-        return self._real.open_state_dir(home)
+        return _OwnedBy(self.user_id).open_state_dir(home)
 
     def open_state_file(self, dir_fd: int, name: str, *, append: bool = False) -> int:
         return self._real.open_state_file(dir_fd, name, append=append)
@@ -337,6 +338,17 @@ class FakeGateway:
     def exit_process(self, code: int) -> NoReturn:
         self.exits.append(code)
         raise FakeExit(code)
+
+
+class _OwnedBy(gw.RealGateway):
+    """The real state-directory code with the injected uid, so the owner check is the real one."""
+
+    def __init__(self, uid: int) -> None:
+        super().__init__()
+        self._uid = uid
+
+    def uid(self) -> int:
+        return self._uid
 
 
 def private_home(tmp_path: Path) -> str:

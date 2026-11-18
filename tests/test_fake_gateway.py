@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import http.client
+import os
 import socket
 import threading
 from pathlib import Path
@@ -148,6 +149,12 @@ def test_exit_process_raises_instead_of_exiting() -> None:
     with pytest.raises(FakeExit) as exc:
         g.exit_process(12)
     assert exc.value.code == 12 and g.exits == [12]
+
+
+def test_the_default_uid_is_the_real_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert FakeGateway().uid() == os.getuid()
+    monkeypatch.setattr(os, "getuid", lambda: 4242)
+    assert FakeGateway().uid() == 4242
 
 
 def test_state_dir_works_on_a_private_home(tmp_path: Path) -> None:

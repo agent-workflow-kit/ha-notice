@@ -363,6 +363,27 @@ class _RealConnection:
         self._conn.close()
 
 
+def _make_private_dirs(path: str) -> None:
+    """Create the missing components of an absolute ``path`` one by one with mode 0700.
+
+    ``os.makedirs`` applies its mode to the leaf only. Existing components are followed and never
+    changed.
+    """
+    missing: list[str] = []
+    current = path
+    while not os.path.lexists(current):
+        missing.append(current)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    for component in reversed(missing):
+        try:
+            os.mkdir(component, 0o700)
+        except FileExistsError:
+            pass
+
+
 class RealGateway:
     """The production gateway."""
 
@@ -551,7 +572,7 @@ class RealGateway:
             raise StateDirError("state directory home is not absolute")
         try:
             parent = os.path.join(home, *STATE_DIR_PARTS[:-1])
-            os.makedirs(parent, mode=0o700, exist_ok=True)
+            _make_private_dirs(parent)
             parent_fd = os.open(parent, flags)
             try:
                 os.mkdir(STATE_DIR_PARTS[-1], 0o700, dir_fd=parent_fd)
