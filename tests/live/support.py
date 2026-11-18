@@ -251,7 +251,7 @@ def run_tool(
 def send(
     config: Path,
     cfg: LiveConfig,
-    payload: dict[str, object],
+    payload: Mapping[str, object],
     *extra: str,
     token: str | None = None,
 ) -> ToolRun:
@@ -317,11 +317,11 @@ def raw_request(
         conn.close()
 
 
-def _post_notify_unchecked(cfg: LiveConfig, body: dict[str, object]) -> RawReply:
+def _post_notify_unchecked(cfg: LiveConfig, body: Mapping[str, object]) -> RawReply:
     return raw_request(cfg, "POST", f"/api/services/notify/{cfg.service}", body=body)
 
 
-def raw_post_notify(cfg: LiveConfig, body: dict[str, object]) -> RawReply:
+def raw_post_notify(cfg: LiveConfig, body: Mapping[str, object]) -> RawReply:
     """POST a notify body without the tool (for sizes the tool caps). Refuses command words."""
     message = body.get("message")
     if not isinstance(message, str) or check_command_keyword(message):
@@ -342,7 +342,7 @@ def send_command_word(cfg: LiveConfig, word: str, title: str) -> RawReply:
 
 def position_text(length: int) -> str:
     """Filler whose position can be read off the phone: ``000000 000007 000014 ...``."""
-    return "".join(f"{i:06d} " for i in range(0, length // 7 + 1))[:length]
+    return "".join(f"{i * 7:06d} " for i in range(length // 7 + 1))[:length]
 
 
 def scratch_dir() -> Path:

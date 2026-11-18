@@ -76,4 +76,3 @@ def test_command_word_families(live: LiveConfig, run_id: str) -> None:
         "still refused by the tool; the default stays)",
         "any word that is NOT a command on any platform (the refusal may be too broad)",
     )
-

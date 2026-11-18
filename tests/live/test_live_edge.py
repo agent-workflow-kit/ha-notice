@@ -104,7 +104,9 @@ def test_unreachable_host_timeout(live: LiveConfig, run_id: str, workdir: Path) 
     assert run.code == 12, run.describe()
     assert run.elapsed <= limit, f"took {run.elapsed:.1f} s, more than timeout + 3 s"
     see("Nothing: nothing is delivered.")
-    record("elapsed seconds and the error code above (design: bounded by timeout and connect_timeout)")
+    record(
+        "elapsed seconds and the error code above (design: bounded by timeout and connect_timeout)"
+    )
 
 
 @settles("self-signed")

@@ -66,7 +66,9 @@ def test_every_live_test_names_a_known_checklist_item(name: str, func: ast.Funct
 
 @pytest.mark.parametrize("item", sorted(ITEMS))
 def test_every_checklist_item_exists_in_design_md(item: str) -> None:
-    assert ITEMS[item] in LIVE_SECTION, f"{item}: {ITEMS[item]!r} not in design.md Live verification"
+    assert ITEMS[item] in LIVE_SECTION, (
+        f"{item}: {ITEMS[item]!r} not in design.md Live verification"
+    )
 
 
 def test_every_checklist_item_is_settled_by_some_live_test() -> None:
@@ -110,7 +112,8 @@ def _clean_env(tmp: Path, **extra: str) -> dict[str, str]:
 
 def _pytest(tmp: Path, args: list[str], **env: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", f"--basetemp={tmp / 'bt'}", *args],
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider"]
+        + [f"--basetemp={tmp / 'bt'}", *args],
         cwd=ROOT,
         env=_clean_env(tmp, **env),
         capture_output=True,
@@ -254,7 +257,9 @@ def test_send_command_word_needs_the_opt_in() -> None:
         with pytest.raises(CommandsNotAllowed):
             support.send_command_word(_config(ha.base_url), "tts", "t")
         assert ha.connections == 0
-        reply = support.send_command_word(_config(ha.base_url, LIVE_HA_ALLOW_COMMANDS="1"), "tts", "t")
+        reply = support.send_command_word(
+            _config(ha.base_url, LIVE_HA_ALLOW_COMMANDS="1"), "tts", "t"
+        )
         assert reply.status == 200
         (request,) = ha.requests
         assert json.loads(request.body) == {"title": "t", "message": "tts"}
@@ -298,7 +303,7 @@ def _inner(tmp: Path, args: list[str], env: dict[str, str]) -> subprocess.Comple
 def _titles(ha: FakeHA) -> list[str]:
     out: list[str] = []
     for request in ha.requests:
-        if request.method == "POST":
+        if request.method == "POST" and request.header("Authorization") == f"Bearer {TOKEN}":
             body = json.loads(request.body)
             out.append(str(body.get("title", "")))
     return out
@@ -342,10 +347,12 @@ def test_live_tests_run_against_the_fake_home_assistant(tmp_path: Path) -> None:
         links = [b["data"] for b in tagged if "data" in b and "url" in b["data"]]
         assert len(links) == 1 and links[0]["clickAction"] == links[0]["url"]
         # markup sent literally; every title carries the unique marker except the test message
-        assert any(b.get("message") == '<b>x</b> <a href="https://example.org">y</a>' for b in tagged)
-        assert all(
-            t.startswith("ha-notice live test ") or t == "ha-notice" for t in _titles(ha)
-        ), _titles(ha)
+        assert any(
+            b.get("message") == '<b>x</b> <a href="https://example.org">y</a>' for b in tagged
+        )
+        assert all(t.startswith("ha-notice live test ") or t == "ha-notice" for t in _titles(ha)), (
+            _titles(ha)
+        )
         # the prefixed fake got the probe and one send; the stalled one got the dummy token only
         assert [r.method for r in prefixed.requests] == ["GET", "POST"]
         assert all(TOKEN.encode() not in raw for raw in stalled.received)
