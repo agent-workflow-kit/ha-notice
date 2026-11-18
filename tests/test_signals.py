@@ -373,6 +373,9 @@ def test_a_real_process_exits_128_plus_n_on_a_stalled_stdin(tmp_path: Path, sign
         if proc.poll() is None:
             proc.kill()
             proc.wait(10)
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            if pipe is not None:
+                pipe.close()
     assert proc.returncode == 128 + signum
     assert out == b"" and err == b""
     assert not (tmp_path / ".local").exists()
@@ -386,4 +389,7 @@ def test_a_real_process_without_a_signal_still_works(tmp_path: Path) -> None:
         if proc.poll() is None:
             proc.kill()
             proc.wait(10)
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            if pipe is not None:
+                pipe.close()
     assert proc.returncode == 0 and json.loads(out)["outcome"] == "dry_run"
