@@ -96,7 +96,9 @@ def test_the_tag_is_the_one_of_send(key: str) -> None:
     assert send_body["data"]["tag"] == render_clear(tag_from_dedupe_key(key)).body["data"]["tag"]
 
 
-@pytest.mark.parametrize("tag", ["", "awkit-", "awkit-XYZ", "AWKIT-" + "0" * 24, "x" * 30, TAG + "0"])
+@pytest.mark.parametrize(
+    "tag", ["", "awkit-", "awkit-XYZ", "AWKIT-" + "0" * 24, "x" * 30, TAG + "0"]
+)
 def test_render_clear_refuses_anything_but_a_tag(tag: str) -> None:
     with pytest.raises(ValueError):
         render_clear(tag)
@@ -120,9 +122,7 @@ VARIANTS = [
 @pytest.mark.parametrize("message", VARIANTS)
 def test_send_still_refuses_clear_notification(message: str) -> None:
     with pytest.raises(PayloadError) as info:
-        notification_from_flags(
-            title=None, message=message, level=None, link=None, link_hosts=None
-        )
+        notification_from_flags(title=None, message=message, level=None, link=None, link_hosts=None)
     assert info.value.reason == "command_keyword"
 
 
@@ -140,7 +140,9 @@ def test_send_input_can_never_make_the_clear_body(rig: Rig) -> None:
     nothing; the tag only goes into ``data``)."""
     messages = [*VARIANTS, "clear_notification x", "clear notification", "clear_notification.", "x"]
     for message in messages:
-        code, out, _ = rig.run(["--json", "--dry-run", "send", f"--message={message}", "--dedupe-key=k"])
+        code, out, _ = rig.run(
+            ["--json", "--dry-run", "send", f"--message={message}", "--dedupe-key=k"]
+        )
         if code == 0:
             assert json.loads(out)["rendered"]["message"] != "clear_notification"
         else:
@@ -315,7 +317,11 @@ def test_the_dry_run_prints_the_exact_body_and_touches_nothing(rig: Rig, golden:
     assert schema_errors("cli/clear", doc) == [] and doc["rendered"] == BODY
     assert doc["bytes"] == len(serialize(BODY)) and doc["http_status"] is None
     golden.check("output", "clear-dry-run.json", out, schema="cli/clear")
-    assert calls == [] and rig.gw.connections == [] and not (Path(str(rig.gw.home)) / ".local").exists()
+    assert (
+        calls == []
+        and rig.gw.connections == []
+        and not (Path(str(rig.gw.home)) / ".local").exists()
+    )
     human = rig.run(["--dry-run", "clear", f"--dedupe-key={KEY}"], config=rig.cfg(""), env={})
     assert human == (0, "", serialize(BODY).decode() + "\n")
     assert rig.run(["--dry-run", "--quiet", "clear", f"--dedupe-key={KEY}"])[1:] == ("", "")
@@ -359,7 +365,11 @@ def test_a_missing_or_invalid_token_is_credential_invalid(rig: Rig) -> None:
     for env in ({}, {"HA_TOKEN": "bad token"}, {"HA_TOKEN": ""}):
         code, out, _ = rig.run(CLEAR, env=env)
         body = error_of(out)
-        assert (code, body["code"], body["details"]) == (12, "credential_invalid", {"env": "HA_TOKEN"})
+        assert (code, body["code"], body["details"]) == (
+            12,
+            "credential_invalid",
+            {"env": "HA_TOKEN"},
+        )
     assert rig.gw.connections == []
     assert rig.records()[0]["code"] == "credential_invalid" and rig.records()[0]["tag_set"] is True
 
@@ -473,7 +483,9 @@ def test_insecure_http_warns_once_and_is_in_warnings(rig: Rig) -> None:
     cfg = rig.cfg("base_url: http://ha.example\nservice: s\nallow_insecure_http: true\n")
     code, out, err = rig.run(["--quiet", *CLEAR], config=cfg)
     doc = json.loads(out)
-    assert code == 0 and doc["warnings"] == ["insecure_http"] and schema_errors("cli/clear", doc) == []
+    assert (
+        code == 0 and doc["warnings"] == ["insecure_http"] and schema_errors("cli/clear", doc) == []
+    )
     assert err.count("insecure_http") == 1
 
 

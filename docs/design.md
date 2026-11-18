@@ -73,6 +73,7 @@ Still to verify (live tests in the plan; the interface states a conservative def
 - The 401 body for a wrong (not missing) token; an unreachable host's timeout (the test hit an instant refusal only); a self-signed certificate through `ca_file`; a base URL with a path prefix; whether other notify services (not companion apps) accept the same body.
 - The compiled default CA paths of a uv-managed Python on the user's machine (V18; the default is that a path is usable by loading, not by existence, and the fixed fallback list covers the rest).
 - V20: the Android companion app may render a small HTML subset (`<b>`, `<a href>`) in `message` (documentation from memory, unverified). If so a producer could show text that names one site while the link target is another, which defeats `link_hosts`. Default: not escaped. Live check: one notification with `<b>x</b>` and `<a href="https://example.org">y</a>` in `message`, a person looks at the phone. An escaping option is not added until the behaviour is seen.
+- V21: `clear` removes a notification by tag on the phone (the body is `clear_notification` with `data.tag`, from the companion-app documentation; never seen on a phone). Live check: one tagged notification, then `ha-notice clear` with the same key, a person looks at the phone: the notification disappears and nothing new appears.
 
 Later (additive, after a live phone test): whether `importance`, `channel`, `ttl`, `priority` and `push.interruption-level` take effect from a REST call, as optional per-level `data` keys.
 
