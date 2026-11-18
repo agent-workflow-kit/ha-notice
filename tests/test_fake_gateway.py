@@ -221,3 +221,16 @@ def test_read_minus_one_reads_to_eof() -> None:
     conn.connect()
     conn.request("GET", "/", None, {})
     assert conn.getresponse().read(-1) == b"abcdef"
+
+
+def test_state_file_truncate_matches_the_real_gateway(tmp_path: Path) -> None:
+    g = FakeGateway(home=str(tmp_path))
+    dir_fd = g.open_state_dir(str(tmp_path))
+    fd = g.open_state_file(dir_fd, "log.jsonl", append=True)
+    try:
+        g.write_fd(fd, b"abcdef")
+        g.state_file_truncate(fd, 3)
+        assert g.state_file_size(fd) == 3
+    finally:
+        g.close_fd(fd)
+        g.close_fd(dir_fd)
