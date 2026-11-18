@@ -240,21 +240,27 @@ def test_stdin_json_with_file_dash_is_one_source_and_accepted(
 
 
 @pytest.mark.parametrize(
-    "argv",
+    ("argv", "config", "file"),
     [
-        ["--config=", "send", "--message=a"],
-        ["send", "--message=a", "--config", ""],
-        ["send", "--file="],
-        ["send", "--file", ""],
+        (["--config=", "send", "--message=a"], "", None),
+        (["send", "--message=a", "--config", ""], "", None),
+        (["send", "--file="], None, ""),
+        (["send", "--file", ""], None, ""),
     ],
 )
 def test_empty_config_and_file_pass_through_to_the_handler(
-    run: Any, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    run: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    config: str | None,
+    file: str | None,
 ) -> None:
     seen = _spy_invocations(monkeypatch)
     run(argv, FakeGateway())
     assert seen
-    assert seen[0].config == "" or (seen[0].send is not None and seen[0].send.file == "")
+    assert seen[0].config == config
+    assert seen[0].send is not None
+    assert seen[0].send.file == file
 
 
 def test_dash_h_alone_is_still_help(run: Any) -> None:
