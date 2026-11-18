@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import math
 import os
 import pwd
 import select
 import ssl
 import stat
 import time
+import types
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -293,16 +293,26 @@ def test_read_source_fd_stall_times_out_with_what_arrived(
             timeouts_ms.append(timeout)
             return self._poller.poll(timeout)
 
-    monkeypatch.setattr(gw.select, "poll", RecordingPoll)
+    monkeypatch.setattr(
+        gw,
+        "select",
+        types.SimpleNamespace(poll=RecordingPoll, POLLIN=select.POLLIN, POLLNVAL=select.POLLNVAL),
+    )
+    # Plenty of time left (5 s) for the first polls, then none: only the slice, not `left`,
+    # can bound each poll. The literal 100 ms is the contract, not the src constant.
+    calls = 0
+
+    def remaining() -> float:
+        nonlocal calls
+        calls += 1
+        return 5.0 if calls <= 4 else 0.0
+
     start = time.monotonic()
-    res = real.read_source(r, 100, lambda: 0.3 - (time.monotonic() - start))
+    res = real.read_source(r, 100, remaining)
     elapsed = time.monotonic() - start
     assert (res.data, res.status) == (b"0123456789", "timeout")
-    assert 0.25 <= elapsed < 1.5 + LOAD_SLACK_S
-    # The slice is deterministic: no poll waits longer than one slice, and the read stops
-    # once the remaining time is used up (the last poll waits at most what was left).
-    assert timeouts_ms and max(timeouts_ms) <= math.ceil(gw.SLICE_SECONDS * 1000)
-    assert len(timeouts_ms) >= 2 and timeouts_ms[-1] >= 1
+    assert len(timeouts_ms) == 4 and max(timeouts_ms) <= 100
+    assert 0.25 <= elapsed < 1.5 + LOAD_SLACK_S  # real-clock guard: ~3 stalled slices of 100 ms
 
 
 def test_read_source_notices_the_deadline_within_a_slice(

@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from ha_notice.cli import main
-from ha_notice.deadline import SLICE_S, Kind, WritingGate, run_with_deadline
+from ha_notice.deadline import Kind, WritingGate, run_with_deadline
 from ha_notice.gateway import HANDLED_SIGNALS, RealGateway
 from ha_notice.hass import RawResponse
 from ha_notice.output import flush_streams
@@ -494,7 +494,7 @@ def test_stop_wired_to_the_flag_settles_by_the_gate_state() -> None:
     assert verdict.kind is Kind.DEADLINE and verdict.gate is Gate.IDLE
     assert time.monotonic() - started < 1.5 + LOAD_SLACK_S  # noticed within a slice
     # Deterministic: the main thread never waits longer than one slice, so it can notice the stop.
-    assert gate.waits and max(gate.waits) <= SLICE_S
+    assert len(gate.waits) >= 2 and max(gate.waits) <= 0.1
     assert state.exit_code == 143
 
 
