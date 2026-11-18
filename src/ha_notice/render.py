@@ -11,7 +11,8 @@ other than the link and the (already hashed) tag reaches it. The command-keyword
 full sanitized message in ``validate_notification`` and is not repeated here: a cut message ends
 in the marker and so can never be a keyword.
 
-TODO(#18): the tag is computed from the dedupe key by the caller; this module takes the tag.
+``tag_from_dedupe_key`` derives the tag from the dedupe key and ``dedupe_key_sha256`` the log's
+hash of it (both from one digest helper); ``render`` takes the finished tag.
 """
 
 from __future__ import annotations
@@ -25,13 +26,22 @@ from typing import Any
 
 from ha_notice.payload import Notification
 
-__all__ = ["MARKER", "Rendered", "message_sha256", "render", "serialize"]
+__all__ = [
+    "MARKER",
+    "Rendered",
+    "dedupe_key_sha256",
+    "message_sha256",
+    "render",
+    "serialize",
+    "tag_from_dedupe_key",
+]
 
 TITLE_MAX = 256
 MESSAGE_MAX_BYTES = 2000
 MARKER = "…[truncated]"
 ELLIPSIS = "…"
 
+_DEDUPE_KEY_MAX = 1024
 _TAG = re.compile(r"awkit-[0-9a-f]{24}")
 _GROUP = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _SCHEME = re.compile(r"https?://", re.ASCII | re.IGNORECASE)
@@ -81,6 +91,50 @@ def message_sha256(title: str | None, message: str) -> str:
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+def _key_digest(key: str) -> str:
+    """Full SHA-256 hex digest of the key's UTF-8 bytes, with the one validation shared by
+    ``tag_from_dedupe_key`` and ``dedupe_key_sha256``.
+
+    The CLI has already refused an empty key, one over 1024 characters and one that is not valid
+    UTF-8 (a lone surrogate, as ``surrogateescape`` argv decoding makes of a bad byte), so each
+    of those is a ``ValueError`` here, with a fixed message that does not echo the key. ``str``
+    methods are called unbound so a subclass cannot change what is measured or hashed."""
+    if not isinstance(key, str):
+        raise TypeError("dedupe key must be a str")
+    size = str.__len__(key)
+    if size == 0 or size > _DEDUPE_KEY_MAX:
+        raise ValueError("dedupe key is empty or longer than 1024 characters")
+    raw: bytes | None
+    try:
+        raw = str.encode(key, "utf-8")
+    except UnicodeEncodeError:
+        raw = None
+    if raw is None:
+        # Raised outside the handler: inside it, __context__ would keep the exception whose
+        # ``object`` attribute is the key.
+        raise ValueError("dedupe key is not valid UTF-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def tag_from_dedupe_key(key: str) -> str:
+    """``awkit-`` plus the first 24 lowercase hex characters of the SHA-256 of the key's UTF-8
+    bytes (docs/interface.md, Rendering). The level is not part of it. The key is hashed as
+    given (no normalization, no case folding) and never appears in the result. 96 bits make a
+    collision between two different keys negligible; one would only make the later notification
+    replace the earlier one, which is the accepted tag behaviour.
+
+    An empty key, one over 1024 characters or a lone surrogate is a ``ValueError`` with a fixed
+    message that does not echo the key; a non-``str`` is a ``TypeError``."""
+    return "awkit-" + _key_digest(key)[:24]
+
+
+def dedupe_key_sha256(key: str) -> str:
+    """First 16 hex characters of the SHA-256 of the key's UTF-8 bytes: the log's
+    ``dedupe_key_sha256`` (docs/interface.md, send). It is the first 16 characters of the tag's
+    digest. Same errors as ``tag_from_dedupe_key``."""
+    return _key_digest(key)[:16]
+
+
 def _link(link: str) -> str:
     m = _SCHEME.match(link)
     if m is None:
@@ -96,8 +150,8 @@ def render(
     level_prefix: Mapping[str, str],
     tag: str | None = None,
 ) -> Rendered:
-    """Build the notify request body. ``tag`` is ``awkit-`` plus 24 hex characters (TODO(#18):
-    the caller derives it from the dedupe key); anything else is a ``ValueError``, as are a
+    """Build the notify request body. ``tag`` is ``awkit-`` plus 24 hex characters (from
+    ``tag_from_dedupe_key``, derived by the send flow); anything else is a ``ValueError``, as are a
     ``max_chars`` outside 100 to 2000, a ``default_group`` outside
     ``[A-Za-z0-9_-]{1,64}``, an unknown level and a link that is not http or https: those are
     checked upstream and are programming errors here."""
