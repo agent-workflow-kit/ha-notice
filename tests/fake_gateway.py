@@ -331,8 +331,16 @@ class FakeGateway:
     def ca_candidates(self) -> CaCandidates:
         return self.ca
 
-    def new_tls_context(self, ca_files: Sequence[str]) -> gw.ssl.SSLContext:
-        return gw.build_tls_context(ca_files)
+    def new_tls_context(
+        self,
+        ca_files: Sequence[str],
+        ca_dirs: Sequence[str] = (),
+        ca_pems: Sequence[bytes] = (),
+    ) -> gw.ssl.SSLContext:
+        return gw.build_tls_context(ca_files, ca_dirs, ca_pems)
+
+    def has_entries(self, path: str) -> bool:
+        return self._real.has_entries(path)
 
     def connect(self, spec: ConnectSpec) -> FakeConnection:
         if spec.scheme == "https" and spec.tls is None:
