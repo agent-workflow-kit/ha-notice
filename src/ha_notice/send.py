@@ -7,6 +7,9 @@ a ``--file`` problem, 20, or 12 ``unavailable``), the tag is derived and the req
 rendered. With ``--dry-run`` the body is printed and the exit code is 0: no destination, no token,
 no network, no state directory, no log. The environment is never consulted before ``deliver``.
 
+``execute`` (steps 5 and 6) and ``build_plan`` (step 4) are shared with ``validate --test-message``
+(``validate.py``), which reports the ``Result`` as a check instead of printing it.
+
 ``deliver`` is steps 5 to 7: the token and trust (``hass.make_target``), the POST in the deadline
 worker (``deadline.run_with_deadline`` over ``retry.run_attempts``), the result on stdout and
 stderr (written and flushed), then the log step, then ``finish``. A refusal (20) or an input
