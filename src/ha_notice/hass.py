@@ -3,8 +3,8 @@
 One attempt is: connect (name resolution, TCP, TLS), build the request, write it, read the
 answer up to a cap. This module owns the wire shape (URL path, headers, body bytes) and the TLS
 trust; it does not classify an answer (``response.py``), retry (``retry.py``) or enforce the
-whole-send deadline and the writing gate (TODO(#25)). The gate sits between ``open_connection``
-and the request through the ``before_write`` hook of ``exchange``.
+whole-send deadline and the writing gate (``deadline.py``). The gate sits between
+``open_connection`` and the request through the ``before_write`` hook of ``exchange``.
 
 Rules kept here (docs/interface.md, Home Assistant edge):
 
@@ -219,8 +219,8 @@ def request_headers(target: Target, *, body: bytes | None) -> dict[str, str]:
 def open_connection(gateway: Gateway, target: Target) -> Connection:
     """Resolve, connect and complete the TLS handshake; no request byte has been written.
 
-    The connection is closed again when connecting fails. TODO(#25): the writing gate is taken
-    by the caller after this returns, before ``exchange``.
+    The connection is closed again when connecting fails. The writing gate step runs in
+    ``exchange`` through ``before_write``.
     """
     scheme: Literal["http", "https"]
     if target.base.scheme == "https":
@@ -247,7 +247,7 @@ def open_connection(gateway: Gateway, target: Target) -> Connection:
 
 
 def _read_capped(conn: Connection) -> RawResponse:
-    # TODO(#25): bound the 100-Continue loop with the overall deadline. ``getresponse`` skips
+    # Not bounded here, by design (``deadline.py``): ``getresponse`` skips
     # interim 1xx answers in a loop that only ``io_timeout`` per read limits, so a peer that
     # sends 1xx lines forever is not stopped here.
     response = conn.getresponse()
@@ -276,9 +276,11 @@ def exchange(
     """Write one request on a connected ``conn`` and read the capped answer; always closes.
 
     ``before_write`` runs after the headers are built and before the first call that can put a
-    byte on the socket (TODO(#25): the idle-to-writing gate step; it may raise to refuse).
+    byte on the socket (the idle-to-writing gate step of ``deadline.WritingGate``, which raises to
+    refuse).
     Nothing is retried and nothing is classified here (``response.py``, ``retry.py``).
-    TODO(#25): bound the 100-Continue loop with the overall deadline (see ``_read_capped``).
+    The 100-Continue loop and slow trickles are bounded only by the worker thread (see
+    ``_read_capped`` and ``deadline.py``).
     """
     try:
         headers = request_headers(target, body=body)
