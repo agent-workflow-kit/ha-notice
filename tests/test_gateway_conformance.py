@@ -438,6 +438,7 @@ BAD_REQUESTS = [
     ("/ok", {"Authorization": f"Bearer {TOKEN}\r\nX-Evil: 1"}, ValueError),
     ("/ok", {"Authorization": f"Bearer {TOKEN}\u2603"}, UnicodeEncodeError),
     ("/ok", {"Bad:Name": TOKEN}, ValueError),
+    ("/ok", {"X\n": TOKEN}, ValueError),
 ]
 
 
@@ -603,7 +604,73 @@ def test_a_tls_handshake_stall_is_bounded_by_the_connect_timeout() -> None:
     finally:
         conn.close()
         server.close()
-    assert time.monotonic() - t0 < 3.0
+    assert time.monotonic() - t0 < 1.0
+
+
+def test_a_slow_tcp_connect_shortens_the_handshake_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_socket = socket.socket
+
+    class SlowConnect(real_socket):  # type: ignore[misc, valid-type]
+        def connect(self, address: Any) -> None:
+            time.sleep(0.4)
+            super().connect(address)
+
+    monkeypatch.setattr(gw.socket, "socket", SlowConnect)
+    server = LoopbackServer(None)
+    real = RealGateway()
+    spec = ConnectSpec("https", "127.0.0.1", server.port, 0.5, 5.0, tls=real.new_tls_context([]))
+    conn = real.connect(spec)
+    t0 = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError):
+            conn.connect()
+    finally:
+        elapsed = time.monotonic() - t0
+        conn.close()
+        server.close()
+    assert elapsed < 0.75  # one deadline, not 0.4 s plus a fresh 0.5 s for the handshake
+
+
+def test_a_drip_feeding_tls_handshake_is_bounded_by_the_connect_timeout() -> None:
+    # One byte every 0.3 s keeps every single recv under the 0.5 s timeout, so only an overall
+    # deadline over the handshake (not a per-recv timer) can stop it.
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    listener.settimeout(5)
+    stop = threading.Event()
+
+    def drip() -> None:
+        try:
+            peer, _ = listener.accept()
+        except OSError:
+            return
+        with peer:
+            try:
+                for _ in range(40):
+                    if stop.wait(0.3):
+                        return
+                    peer.sendall(b"\x16")
+            except OSError:
+                return
+
+    thread = threading.Thread(target=drip, daemon=True)
+    thread.start()
+    real = RealGateway()
+    port: int = listener.getsockname()[1]
+    spec = ConnectSpec("https", "127.0.0.1", port, 0.5, 5.0, tls=real.new_tls_context([]))
+    conn = real.connect(spec)
+    t0 = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError):
+            conn.connect()
+    finally:
+        elapsed = time.monotonic() - t0
+        conn.close()
+        stop.set()
+        listener.close()
+        thread.join(2)
+    assert elapsed < 1.0
 
 
 # --- internals of the real connection ---------------------------------------------------------

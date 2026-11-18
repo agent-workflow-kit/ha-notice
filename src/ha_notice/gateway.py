@@ -308,6 +308,14 @@ class _RealConnection:
                 sock.close()
                 last = exc
                 continue
+            # http.client wraps this socket in TLS next. CPython bounds a whole handshake by the
+            # socket timeout (one deadline across its reads, not one per read), so re-arming it
+            # with what remains makes a stalled or drip-feeding handshake end with the deadline.
+            remaining = self._time_left()
+            if remaining <= 0:
+                sock.close()
+                raise TimeoutError("connect timed out")
+            sock.settimeout(remaining)
             return sock
         if self._time_left() <= 0:
             raise TimeoutError("connect timed out")

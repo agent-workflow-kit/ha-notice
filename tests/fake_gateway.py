@@ -175,7 +175,7 @@ class FakeConnection:
         if _BAD_PATH.search(path):
             raise http.client.InvalidURL("invalid request path")
         for name, value in headers.items():
-            if not _BAD_HEADER_NAME.match(name):
+            if not _BAD_HEADER_NAME.fullmatch(name):
                 raise ValueError("invalid header")
             if _BAD_HEADER_VALUE.search(value):
                 raise ValueError("invalid header")
