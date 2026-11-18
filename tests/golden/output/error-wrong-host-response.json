@@ -1,0 +1,1 @@
+{"error":{"code":"wrong_host_response","message":"the host did not answer like the notify API; base_url or its path prefix is probably wrong","reason":null,"details":{"http_status":404},"retryable":false,"retry_after_s":null,"unknown_outcome":false}}

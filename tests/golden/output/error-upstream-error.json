@@ -1,0 +1,1 @@
+{"error":{"code":"upstream_error","message":"Home Assistant reported a server error","reason":null,"details":{"http_status":500},"retryable":false,"retry_after_s":null,"unknown_outcome":true}}

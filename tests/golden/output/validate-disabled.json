@@ -1,0 +1,1 @@
+{"ok":true,"enabled":false,"checks":[{"name":"config","ok":true,"message":"the configuration is usable"},{"name":"credential","ok":true,"message":"the token is set and well formed"}]}
