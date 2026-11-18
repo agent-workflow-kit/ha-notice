@@ -226,6 +226,7 @@ def test_a_signal_during_the_probe_is_decided_like_the_deadline(tmp_path: Path, 
             out, _ = proc.communicate(timeout=10)
         finally:
             if proc.poll() is None:
+                proc.kill()  # our own child; reap it if an assertion failed early
                 proc.communicate(timeout=15)
     assert proc.returncode == 12 and b'"message":"outcome_unknown"' in out
 
