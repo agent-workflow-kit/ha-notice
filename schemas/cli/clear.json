@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ha-notice/cli/clear.json",
+  "title": "clear output",
+  "description": "Printed with --json on exit 0 (sent or dry run) and exit 22 (disabled, which prints only outcome). Errors print the error envelope. Same shape as the send output with the fixed values of a clear: level info, truncated false, tag_set true, a dedupe key, and the clear request body as rendered (dry run only).",
+  "type": "object",
+  "properties": {
+    "outcome": {
+      "enum": [
+        "sent",
+        "dry_run",
+        "disabled"
+      ]
+    },
+    "tool": {
+      "$ref": "../defs.json#/$defs/tool"
+    },
+    "level": {
+      "const": "info",
+      "description": "Always info: a clear has no level."
+    },
+    "truncated": {
+      "const": false
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "UTF-8 size of the request body."
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "http_status": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 100,
+      "maximum": 599,
+      "description": "Null for a dry run; an integer when sent."
+    },
+    "tag_set": {
+      "const": true
+    },
+    "dedupe_key": {
+      "$ref": "../defs.json#/$defs/dedupe_key",
+      "description": "The caller's own key, echoed; always present for a clear."
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "insecure_http"
+        ]
+      },
+      "uniqueItems": true,
+      "description": "Fixed strings; [] when none. The only value in 0.x is insecure_http, as for send."
+    },
+    "rendered": {
+      "type": "object",
+      "description": "The JSON body that would be sent: the companion-app command message and the tag, nothing else. No secrets, no caller text.",
+      "properties": {
+        "message": {
+          "const": "clear_notification"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "type": "string",
+              "pattern": "^awkit-[0-9a-f]{24}(?![\\s\\S])"
+            }
+          },
+          "required": [
+            "tag"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message",
+        "data"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "outcome"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "disabled"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "outcome": {}
+        },
+        "maxProperties": 1
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "enum": [
+              "sent",
+              "dry_run"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "outcome",
+          "tool",
+          "level",
+          "truncated",
+          "bytes",
+          "duration_ms",
+          "http_status",
+          "tag_set",
+          "dedupe_key",
+          "warnings"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "dry_run"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "rendered"
+        ],
+        "properties": {
+          "http_status": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "sent"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "required": [
+            "rendered"
+          ]
+        },
+        "properties": {
+          "http_status": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  ]
+}

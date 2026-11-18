@@ -33,6 +33,7 @@ __all__ = [
     "dedupe_key_sha256",
     "message_sha256",
     "render",
+    "render_clear",
     "serialize",
     "tag_from_dedupe_key",
 ]
@@ -191,6 +192,21 @@ def render(
     if data:
         body["data"] = data
     return Rendered(body=body, truncated=title_cut or message_cut)
+
+
+CLEAR_MESSAGE = "clear_notification"
+
+
+def render_clear(tag: str) -> Rendered:
+    """The request body of the ``clear`` command: the companion-app command message and the tag,
+    and nothing else (no title, ``data`` holds only ``tag``).
+
+    This is the only place that builds a body whose message is a command word. ``render`` takes
+    a validated ``Notification`` whose message the command-keyword rule has already refused, so no
+    ``send`` input can reach this shape; only ``send.build_clear_plan`` calls this function."""
+    if _TAG.fullmatch(tag) is None:
+        raise ValueError("tag is not awkit- plus 24 lowercase hex characters")
+    return Rendered(body={"message": CLEAR_MESSAGE, "data": {"tag": tag}}, truncated=False)
 
 
 def serialize(body: Mapping[str, Any]) -> bytes:

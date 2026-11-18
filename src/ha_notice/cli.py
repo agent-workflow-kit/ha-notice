@@ -43,7 +43,7 @@ from ha_notice.output import (
     reset_emitted,
     write_text,
 )
-from ha_notice.send import run_send
+from ha_notice.send import run_clear, run_send
 from ha_notice.signals import SignalReceived, SignalState, install, signal_exit_code
 from ha_notice.validate import run_validate
 
@@ -169,7 +169,7 @@ def _add_global_flags(parser: argparse.ArgumentParser, prefix: str) -> None:
         "--dry-run",
         dest=f"{prefix}_dry_run",
         action="store_true",
-        help="send only: build and print, send nothing",
+        help="send and clear only: build and print, send nothing",
     )
     parser.add_argument(
         "--actor",
@@ -222,6 +222,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--decision-id", action="append", metavar="ID", help="accepted and ignored (repeatable)"
     )
 
+    clear = commands.add_parser(
+        "clear",
+        allow_abbrev=False,
+        help="remove the notification that carries the tag of a dedupe key",
+    )
+    _add_global_flags(clear, "s")
+    clear.add_argument(
+        "--dedupe-key",
+        action=_OnceNonEmpty,
+        required=True,
+        metavar="KEY",
+        help="the key of the notification to clear (use the = form for a value starting with -)",
+    )
+
     validate = commands.add_parser(
         "validate",
         allow_abbrev=False,
@@ -243,6 +257,11 @@ class SendArgs:
     link: str | None
     dedupe_key: str | None
     decision_ids: list[str]
+
+
+@dataclass(frozen=True)
+class ClearArgs:
+    dedupe_key: str
 
 
 @dataclass(frozen=True)
@@ -276,6 +295,7 @@ class Invocation:
     gateway: Gateway
     send: SendArgs | None = None
     validate: ValidateArgs | None = None
+    clear: ClearArgs | None = None
     progress: Progress = field(default_factory=Progress)
     signals: SignalState = field(default_factory=SignalState)
 
@@ -314,6 +334,15 @@ def _one(main_value: str | None, sub_value: str | None) -> str | None:
     return main_value if main_value is not None else sub_value
 
 
+def _check_dedupe_key(key: str) -> None:
+    if len(key) > DEDUPE_KEY_MAX:
+        raise UsageError("--dedupe-key is too long")
+    try:
+        key.encode("utf-8")
+    except UnicodeEncodeError:
+        raise UsageError("--dedupe-key is not valid UTF-8") from None
+
+
 def _check_send(args: SendArgs, stdin_is_tty: Callable[[], bool]) -> None:
     """Step 1 flag combinations (interface.md, Input): exit 2 before the config is consulted."""
     text_flags = (args.title, args.message, args.level, args.link)
@@ -323,12 +352,7 @@ def _check_send(args: SendArgs, stdin_is_tty: Callable[[], bool]) -> None:
     if args.stdin_json and args.file is not None and args.file != "-":
         raise UsageError("--stdin-json cannot be combined with --file")
     if args.dedupe_key is not None:
-        if len(args.dedupe_key) > DEDUPE_KEY_MAX:
-            raise UsageError("--dedupe-key is too long")
-        try:
-            args.dedupe_key.encode("utf-8")
-        except UnicodeEncodeError:
-            raise UsageError("--dedupe-key is not valid UTF-8") from None
+        _check_dedupe_key(args.dedupe_key)
     if not has_json_source:
         if args.message is None and any(v is not None for v in text_flags):
             raise UsageError("text flags need --message")
@@ -368,7 +392,11 @@ def parse(
 
     send: SendArgs | None = None
     validate: ValidateArgs | None = None
-    if ns.command == "send":
+    clear: ClearArgs | None = None
+    if ns.command == "clear":
+        clear = ClearArgs(dedupe_key=ns.dedupe_key)
+        _check_dedupe_key(clear.dedupe_key)
+    elif ns.command == "send":
         send = SendArgs(
             stdin_json=ns.stdin_json,
             file=ns.file,
@@ -396,6 +424,7 @@ def parse(
         gateway=gateway,
         send=send,
         validate=validate,
+        clear=clear,
         signals=SignalState() if signals is None else signals,
     )
 
@@ -407,11 +436,19 @@ def _send(inv: Invocation) -> int:
     return run_send(inv)
 
 
+def _clear(inv: Invocation) -> int:
+    return run_clear(inv)
+
+
 def _validate(inv: Invocation) -> int:
     return run_validate(inv)
 
 
-HANDLERS: dict[str, Callable[[Invocation], int]] = {"send": _send, "validate": _validate}
+HANDLERS: dict[str, Callable[[Invocation], int]] = {
+    "send": _send,
+    "clear": _clear,
+    "validate": _validate,
+}
 
 
 # Exit codes a handler may return (docs/interface.md, Exit codes); 128+N is SignalReceived's.

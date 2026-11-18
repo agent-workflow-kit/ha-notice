@@ -1,0 +1,365 @@
+{
+  "valid": {
+    "sent": {
+      "outcome": "sent",
+      "tool": "ha-notice",
+      "level": "info",
+      "truncated": false,
+      "bytes": 80,
+      "duration_ms": 120,
+      "http_status": 200,
+      "tag_set": true,
+      "dedupe_key": "k1",
+      "warnings": []
+    },
+    "sent_insecure": {
+      "outcome": "sent",
+      "tool": "ha-notice",
+      "level": "info",
+      "truncated": false,
+      "bytes": 80,
+      "duration_ms": 120,
+      "http_status": 200,
+      "tag_set": true,
+      "dedupe_key": "k1",
+      "warnings": [
+        "insecure_http"
+      ]
+    },
+    "dry_run": {
+      "outcome": "dry_run",
+      "tool": "ha-notice",
+      "level": "info",
+      "truncated": false,
+      "bytes": 80,
+      "duration_ms": 120,
+      "http_status": null,
+      "tag_set": true,
+      "dedupe_key": "k1",
+      "warnings": [],
+      "rendered": {
+        "message": "clear_notification",
+        "data": {
+          "tag": "awkit-6ab9f1eb8f7d3388f4f9d586"
+        }
+      }
+    },
+    "disabled": {
+      "outcome": "disabled"
+    }
+  },
+  "invalid": {
+    "empty": {
+      "instance": {},
+      "path": [],
+      "keyword": "required"
+    },
+    "sent_without_key": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": true,
+        "warnings": []
+      },
+      "path": [],
+      "keyword": "required"
+    },
+    "null_key": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": true,
+        "dedupe_key": null,
+        "warnings": []
+      },
+      "path": [
+        "dedupe_key"
+      ],
+      "keyword": "type"
+    },
+    "empty_key": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": true,
+        "dedupe_key": "",
+        "warnings": []
+      },
+      "path": [
+        "dedupe_key"
+      ],
+      "keyword": "minLength"
+    },
+    "tag_not_set": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": "k1",
+        "warnings": []
+      },
+      "path": [
+        "tag_set"
+      ],
+      "keyword": "const"
+    },
+    "level_warn": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "warn",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": true,
+        "dedupe_key": "k1",
+        "warnings": []
+      },
+      "path": [
+        "level"
+      ],
+      "keyword": "const"
+    },
+    "truncated": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": true,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": true,
+        "dedupe_key": "k1",
+        "warnings": []
+      },
+      "path": [
+        "truncated"
+      ],
+      "keyword": "const"
+    },
+    "sent_with_rendered": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": true,
+        "dedupe_key": "k1",
+        "warnings": [],
+        "rendered": {
+          "message": "clear_notification",
+          "data": {
+            "tag": "awkit-6ab9f1eb8f7d3388f4f9d586"
+          }
+        }
+      },
+      "path": [],
+      "keyword": "not"
+    },
+    "dry_run_without_rendered": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": true,
+        "dedupe_key": "k1",
+        "warnings": []
+      },
+      "path": [],
+      "keyword": "required"
+    },
+    "dry_run_with_status": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": true,
+        "dedupe_key": "k1",
+        "warnings": [],
+        "rendered": {
+          "message": "clear_notification",
+          "data": {
+            "tag": "awkit-6ab9f1eb8f7d3388f4f9d586"
+          }
+        }
+      },
+      "path": [
+        "http_status"
+      ],
+      "keyword": "type"
+    },
+    "rendered_with_title": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": true,
+        "dedupe_key": "k1",
+        "warnings": [],
+        "rendered": {
+          "title": "x",
+          "message": "clear_notification",
+          "data": {
+            "tag": "awkit-6ab9f1eb8f7d3388f4f9d586"
+          }
+        }
+      },
+      "path": [
+        "rendered"
+      ],
+      "keyword": "additionalProperties"
+    },
+    "rendered_other_message": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": true,
+        "dedupe_key": "k1",
+        "warnings": [],
+        "rendered": {
+          "message": "hi",
+          "data": {
+            "tag": "awkit-6ab9f1eb8f7d3388f4f9d586"
+          }
+        }
+      },
+      "path": [
+        "rendered",
+        "message"
+      ],
+      "keyword": "const"
+    },
+    "rendered_without_data": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": true,
+        "dedupe_key": "k1",
+        "warnings": [],
+        "rendered": {
+          "message": "clear_notification"
+        }
+      },
+      "path": [
+        "rendered"
+      ],
+      "keyword": "required"
+    },
+    "rendered_data_extra": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": true,
+        "dedupe_key": "k1",
+        "warnings": [],
+        "rendered": {
+          "message": "clear_notification",
+          "data": {
+            "tag": "awkit-6ab9f1eb8f7d3388f4f9d586",
+            "group": "g"
+          }
+        }
+      },
+      "path": [
+        "rendered",
+        "data"
+      ],
+      "keyword": "additionalProperties"
+    },
+    "rendered_bad_tag": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 80,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": true,
+        "dedupe_key": "k1",
+        "warnings": [],
+        "rendered": {
+          "message": "clear_notification",
+          "data": {
+            "tag": "awkit-XYZ"
+          }
+        }
+      },
+      "path": [
+        "rendered",
+        "data",
+        "tag"
+      ],
+      "keyword": "pattern"
+    },
+    "disabled_with_extra": {
+      "instance": {
+        "outcome": "disabled",
+        "tool": "ha-notice"
+      },
+      "path": [],
+      "keyword": "maxProperties"
+    },
+    "bad_outcome": {
+      "instance": {
+        "outcome": "queued"
+      },
+      "path": [
+        "outcome"
+      ],
+      "keyword": "enum"
+    }
+  }
+}
