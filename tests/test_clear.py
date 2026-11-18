@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from ha_notice import cli as cli_module
 from ha_notice import render as render_module
 from ha_notice import send as send_module
 from ha_notice.cli import main
@@ -248,7 +249,7 @@ def test_help_works_for_clear(rig: Rig) -> None:
     assert rig.run(["clear", "--help", "--dedupe-key=k"])[0] == 0
 
 
-def test_no_stdin_is_read_and_no_tty_is_asked(rig: Rig) -> None:
+def test_no_stdin_is_read(rig: Rig) -> None:
     rig.gw.sources.clear()  # a read of fd 0 would be a failure of the fake
     calls: list[Any] = []
     original = rig.gw.read_source
@@ -463,6 +464,56 @@ def test_a_signal_before_the_send_is_128_plus_n_and_unlogged(rig: Rig, signum: i
     gw = Sig(home=rig.gw.home, ca=rig.gw.ca)
     assert rig.run(CLEAR, gateway=gw) == (128 + signum, "", "")
     assert gw.connections == [] and not rig.state_dir.exists()
+
+
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT, signal.SIGHUP])
+def test_a_signal_at_the_start_of_clear_is_128_plus_n_and_unlogged(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, signum: int
+) -> None:
+    real = cli_module.run_clear
+
+    def signalled(inv: Any) -> int:
+        rig.gw.deliver_signal(signum)  # pending before run_clear's first check
+        return real(inv)
+
+    monkeypatch.setattr(cli_module, "run_clear", signalled)
+    assert rig.run(CLEAR) == (128 + signum, "", "")
+    assert rig.gw.connections == [] and not rig.state_dir.exists()
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT, signal.SIGHUP])
+def test_a_signal_after_the_render_is_128_plus_n_with_no_send_and_no_log(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, signum: int, dry_run: bool
+) -> None:
+    real = send_module.build_clear_plan
+
+    def signalled(*args: Any) -> Any:
+        plan = real(*args)
+        rig.gw.deliver_signal(signum)  # pending before the check after the render
+        return plan
+
+    monkeypatch.setattr(send_module, "build_clear_plan", signalled)
+    argv = ["--dry-run", *CLEAR] if dry_run else CLEAR
+    assert rig.run(argv) == (128 + signum, "", "")
+    assert rig.gw.connections == [] and not rig.state_dir.exists()
+
+
+def test_clear_prints_and_flushes_the_result_before_it_writes_the_log(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[str] = []
+    real = send_module.log_facts
+
+    def log_spy(*args: Any) -> None:
+        seen.append(rig.capsys.readouterr().out)  # what was written to stdout before the log
+        real(*args)
+
+    monkeypatch.setattr(send_module, "log_facts", log_spy)
+    code, out, _ = rig.run(CLEAR)
+    assert code == 0 and out == "" and len(seen) == 1
+    assert json.loads(seen[0])["outcome"] == "sent"
+    assert len(rig.records()) == 1
 
 
 def test_log_false_writes_nothing(rig: Rig) -> None:
