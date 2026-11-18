@@ -1,26 +1,474 @@
-"""Command-line entry point for ha-notice."""
+"""Command-line entry point for ha-notice: parsing, step 1 checks, dispatch and error output.
+
+Parsing rules (docs/interface.md, Global flags, Input and Output):
+
+- Flags are exact: no abbreviations, on the main parser and on every subparser.
+- ``--flag=value`` and ``--flag value`` are the same, but a separate value that starts with ``-``
+  (other than a lone ``-``) is refused, whatever argparse would make of it: such a value must use
+  the ``=`` form. ``--`` and single-dash tokens other than ``-h`` are refused: there are no
+  positional arguments and no short options. ``-h`` and ``--help`` work before or after the
+  subcommand. An empty ``--actor`` or ``--dedupe-key`` is refused; an empty ``--config`` or
+  ``--file`` is passed through (later steps judge it).
+- Global flags are accepted before and after the subcommand; a value flag given twice (also once
+  on each side) is refused. Repeating a boolean flag is harmless. ``--verbose`` with ``--quiet``
+  is refused.
+- A usage error prints one fixed line on stderr and, when ``--json`` is in argv (looked for before
+  anything is parsed), the error envelope on stdout. Messages never contain input.
+"""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, TextIO
 
 from ha_notice import __version__
 from ha_notice.gateway import Gateway, RealGateway
 
+# interface.md, send: the whole string must match (re.fullmatch, never re.match or a `$`).
+ACTOR_RE = re.compile(r"(?:human|auto):[A-Za-z0-9._@/-]{1,64}")
+_LOGIN_BAD_CHARS = re.compile(r"[^A-Za-z0-9._@-]")
+DEDUPE_KEY_MAX = 1024
+
+# Long flags that take a value (used to refuse a separate value that starts with "-").
+VALUE_FLAGS = frozenset(
+    {
+        "--config",
+        "--actor",
+        "--file",
+        "--title",
+        "--message",
+        "--level",
+        "--link",
+        "--dedupe-key",
+        "--decision-id",
+    }
+)
+
+
+class UsageError(Exception):
+    """Exit 2 ``usage``. ``message`` is a fixed string: it never contains input."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class _ParserExit(Exception):
+    """``--help`` or ``--version`` finished (argparse's ``exit``, without ``SystemExit``)."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(status)
+        self.status = status
+
+
+# --- output ---------------------------------------------------------------------------------
+
+
+def _discard_pending(stream: Any) -> None:
+    """Point the stream's descriptor at the null device after a failed write, so that the data
+    still buffered cannot fail again (and change the exit code) at interpreter shutdown."""
+    try:
+        fd = stream.fileno()
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, fd)
+        finally:
+            os.close(devnull)
+    except Exception:  # noqa: BLE001 - best effort, never changes the exit code
+        pass
+
+
+def write_text(stream: TextIO | None, text: str) -> None:
+    """Write ``text`` as UTF-8 with errors replaced, never through the locale; ignore failures.
+
+    A failure to write (``BrokenPipeError`` or any ``OSError``, a closed stream, a missing stream)
+    never changes the exit code. TODO(#7): the exact flush and ordering rules of the output step.
+    """
+    if stream is None:
+        return
+    data = text.encode("utf-8", errors="replace")
+    try:
+        buffer = getattr(stream, "buffer", None)
+        if buffer is not None:
+            stream.flush()
+            buffer.write(data)
+            buffer.flush()
+        else:
+            stream.write(data.decode("utf-8"))
+            stream.flush()
+    except Exception:  # noqa: BLE001 - output failures are ignored (OSError, ValueError, ...)
+        _discard_pending(stream)
+
+
+def dumps(obj: Any) -> str:
+    """The serialization of every JSON document the tool prints (interface.md, send)."""
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+
+
+def error_envelope(
+    code: str,
+    message: str,
+    *,
+    reason: str | None = None,
+    details: dict[str, Any] | None = None,
+    retryable: bool | None = None,
+    retry_after_s: int | float | None = None,
+    unknown_outcome: bool | None = None,
+) -> dict[str, Any]:
+    return {
+        "error": {
+            "code": code,
+            "message": message,
+            "reason": reason,
+            "details": details,
+            "retryable": retryable,
+            "retry_after_s": retry_after_s,
+            "unknown_outcome": unknown_outcome,
+        }
+    }
+
+
+def emit_error(json_mode: bool, envelope: dict[str, Any]) -> None:
+    """One line on stderr always (``<code>: <message>``); the envelope on stdout with --json.
+
+    TODO(#7): ``refused (<reason>): <message>`` for exit 20 and the full exit-code table.
+    """
+    error = envelope["error"]
+    write_text(sys.stderr, f"{error['code']}: {error['message']}\n")
+    if json_mode:
+        write_text(sys.stdout, dumps(envelope) + "\n")
+
+
+# --- parser ---------------------------------------------------------------------------------
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse with the tool's output rules: no SystemExit, no input in messages."""
+
+    def error(self, message: str) -> Any:
+        raise UsageError("invalid command line; see ha-notice --help")
+
+    def exit(self, status: int = 0, message: str | None = None) -> Any:
+        raise _ParserExit(status)
+
+    def print_help(self, file: Any = None) -> None:
+        write_text(sys.stdout if file is None else file, self.format_help())
+
+
+class _Once(argparse.Action):
+    """A value flag that may be given once (an empty value is accepted)."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        if getattr(namespace, self.dest, None) is not None:
+            raise UsageError("a flag was given more than once")
+        setattr(namespace, self.dest, values)
+
+
+class _OnceNonEmpty(_Once):
+    """Once, and not empty (--actor, --dedupe-key)."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        if values == "":
+            raise UsageError("a flag value is empty")
+        super().__call__(parser, namespace, values, option_string)
+
+
+class _Version(argparse.Action):
+    def __init__(self, option_strings: Sequence[str], dest: str, **kwargs: Any) -> None:
+        super().__init__(
+            option_strings, dest, nargs=0, default=argparse.SUPPRESS, help=kwargs["help"]
+        )
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        write_text(sys.stdout, f"ha-notice {__version__}\n")
+        parser.exit(0)
+
+
+def _add_global_flags(parser: argparse.ArgumentParser, prefix: str) -> None:
+    """The global flags. The main parser and each subparser use different dests (``prefix``), so
+    that a flag on one side never overwrites the other and both can be compared."""
+    parser.add_argument(
+        "--json",
+        dest=f"{prefix}_json",
+        action="store_true",
+        help="machine-readable output on stdout",
+    )
+    parser.add_argument(
+        "--config",
+        dest=f"{prefix}_config",
+        action=_Once,
+        metavar="PATH",
+        help="config file instead of the default",
+    )
+    parser.add_argument(
+        "--dry-run",
+        dest=f"{prefix}_dry_run",
+        action="store_true",
+        help="send only: build and print, send nothing",
+    )
+    parser.add_argument(
+        "--actor",
+        dest=f"{prefix}_actor",
+        action=_OnceNonEmpty,
+        metavar="ACTOR",
+        help="actor recorded in the log: (human|auto):NAME",
+    )
+    parser.add_argument(
+        "--verbose", dest=f"{prefix}_verbose", action="store_true", help="one stderr line per phase"
+    )
+    parser.add_argument(
+        "--quiet",
+        dest=f"{prefix}_quiet",
+        action="store_true",
+        help="suppress stderr lines except errors and warnings",
+    )
+    parser.add_argument("--version", action=_Version, help="print the version")
+
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _Parser(
         prog="ha-notice",
         allow_abbrev=False,
         description="Send a notification through the Home Assistant REST notify service.",
     )
-    parser.add_argument("--version", action="version", version=f"ha-notice {__version__}")
-    parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
-    parser.add_subparsers(dest="command", metavar="<command>")
+    _add_global_flags(parser, "m")
+    commands = parser.add_subparsers(dest="command", metavar="<command>", parser_class=_Parser)
+
+    send = commands.add_parser("send", allow_abbrev=False, help="send one notification")
+    _add_global_flags(send, "s")
+    send.add_argument("--stdin-json", action="store_true", help="read the notification from stdin")
+    send.add_argument(
+        "--file",
+        action=_Once,
+        metavar="PATH",
+        help="read the notification from a file (- is stdin)",
+    )
+    send.add_argument("--title", action=_Once, metavar="TEXT", help="notification title")
+    send.add_argument("--message", action=_Once, metavar="TEXT", help="notification message")
+    send.add_argument("--level", action=_Once, metavar="LEVEL", help="info, warn, action or error")
+    send.add_argument("--link", action=_Once, metavar="URL", help="http or https link")
+    send.add_argument(
+        "--dedupe-key",
+        action=_OnceNonEmpty,
+        metavar="KEY",
+        help="replacement key (use the = form for a value starting with -)",
+    )
+    send.add_argument(
+        "--decision-id", action="append", metavar="ID", help="accepted and ignored (repeatable)"
+    )
+
+    validate = commands.add_parser(
+        "validate",
+        allow_abbrev=False,
+        help="check the config, credential and, optionally, the host",
+    )
+    _add_global_flags(validate, "s")
+    validate.add_argument("--probe", action="store_true", help="call GET /api/ (sends nothing)")
+    validate.add_argument("--test-message", action="store_true", help="send one test notification")
     return parser
+
+
+@dataclass(frozen=True)
+class SendArgs:
+    stdin_json: bool
+    file: str | None
+    title: str | None
+    message: str | None
+    level: str | None
+    link: str | None
+    dedupe_key: str | None
+    decision_ids: list[str]
+
+
+@dataclass(frozen=True)
+class ValidateArgs:
+    probe: bool
+    test_message: bool
+
+
+@dataclass(frozen=True)
+class Invocation:
+    """Everything a command handler gets: the parsed flags, the environment and the gateway."""
+
+    command: str
+    json: bool
+    config: str | None
+    dry_run: bool
+    verbose: bool
+    quiet: bool
+    actor: str
+    actor_source: str  # flag | tty | default
+    env: Mapping[str, str]
+    gateway: Gateway
+    send: SendArgs | None = None
+    validate: ValidateArgs | None = None
+
+
+def resolve_actor(flag: str | None, gateway: Gateway) -> tuple[str, str]:
+    """The actor and how it was obtained (interface.md, send)."""
+    if flag is not None:
+        return flag, "flag"
+    if not gateway.isatty(0):
+        return "auto:unknown", "default"
+    login = gateway.login_name()
+    user = _LOGIN_BAD_CHARS.sub("_", login)[:64] if login else ""
+    return f"human:{user or 'unknown'}", "tty"
+
+
+def wants_json(argv: Sequence[str]) -> bool:
+    """``--json`` is looked for in argv before anything is parsed."""
+    return any(tok == "--json" or tok.startswith("--json=") for tok in argv)
+
+
+def _precheck(argv: Sequence[str]) -> None:
+    for i, tok in enumerate(argv):
+        if tok == "--":
+            raise UsageError("unexpected --")
+        if tok.startswith("-") and not tok.startswith("--") and tok not in ("-", "-h"):
+            raise UsageError("single-dash options are not accepted")
+        if tok in VALUE_FLAGS and i + 1 < len(argv):
+            nxt = argv[i + 1]
+            if nxt.startswith("-") and nxt != "-":
+                raise UsageError("a value that starts with - needs the --flag=value form")
+
+
+def _one(main_value: str | None, sub_value: str | None) -> str | None:
+    if main_value is not None and sub_value is not None:
+        raise UsageError("a flag was given more than once")
+    return main_value if main_value is not None else sub_value
+
+
+def _check_send(args: SendArgs, stdin_is_tty: Callable[[], bool]) -> None:
+    """Step 1 flag combinations (interface.md, Input): exit 2 before the config is consulted."""
+    text_flags = (args.title, args.message, args.level, args.link)
+    has_json_source = args.stdin_json or args.file is not None
+    if has_json_source and any(v is not None for v in text_flags):
+        raise UsageError("a JSON source cannot be combined with text flags")
+    if args.stdin_json and args.file is not None and args.file != "-":
+        raise UsageError("--stdin-json cannot be combined with --file")
+    if args.dedupe_key is not None:
+        if len(args.dedupe_key) > DEDUPE_KEY_MAX:
+            raise UsageError("--dedupe-key is too long")
+        try:
+            args.dedupe_key.encode("utf-8")
+        except UnicodeEncodeError:
+            raise UsageError("--dedupe-key is not valid UTF-8") from None
+    if not has_json_source:
+        if args.message is None and any(v is not None for v in text_flags):
+            raise UsageError("text flags need --message")
+        if args.message is None and stdin_is_tty():
+            raise UsageError("no input: stdin is a terminal and no source was given")
+    elif (args.stdin_json or args.file == "-") and stdin_is_tty():
+        raise UsageError("stdin is a terminal")
+
+
+def parse(argv: Sequence[str], env: Mapping[str, str], gateway: Gateway) -> Invocation:
+    """Parse argv and run the step 1 checks. Raises ``UsageError`` or ``_ParserExit``."""
+    _precheck(argv)
+    ns = build_parser().parse_args(list(argv))
+    if ns.command is None:
+        raise UsageError("no command given")
+    get = lambda name: getattr(ns, name, None)  # noqa: E731
+    verbose = bool(get("m_verbose") or get("s_verbose"))
+    quiet = bool(get("m_quiet") or get("s_quiet"))
+    if verbose and quiet:
+        raise UsageError("--verbose and --quiet cannot be combined")
+    config = _one(get("m_config"), get("s_config"))
+    actor_flag = _one(get("m_actor"), get("s_actor"))
+    if actor_flag is not None and ACTOR_RE.fullmatch(actor_flag) is None:
+        raise UsageError("--actor does not match (human|auto):NAME")
+
+    tty: list[bool] = []
+
+    def stdin_is_tty() -> bool:
+        if not tty:
+            tty.append(gateway.isatty(0))
+        return tty[0]
+
+    send: SendArgs | None = None
+    validate: ValidateArgs | None = None
+    if ns.command == "send":
+        send = SendArgs(
+            stdin_json=ns.stdin_json,
+            file=ns.file,
+            title=ns.title,
+            message=ns.message,
+            level=ns.level,
+            link=ns.link,
+            dedupe_key=ns.dedupe_key,
+            decision_ids=list(ns.decision_id or []),
+        )
+        _check_send(send, stdin_is_tty)
+    else:
+        validate = ValidateArgs(probe=ns.probe, test_message=ns.test_message)
+    actor, actor_source = resolve_actor(actor_flag, gateway)
+    return Invocation(
+        command=ns.command,
+        json=bool(get("m_json") or get("s_json")),
+        config=config,
+        dry_run=bool(get("m_dry_run") or get("s_dry_run")),
+        verbose=verbose,
+        quiet=quiet,
+        actor=actor,
+        actor_source=actor_source,
+        env=env,
+        gateway=gateway,
+        send=send,
+        validate=validate,
+    )
+
+
+# --- dispatch -------------------------------------------------------------------------------
+
+
+def _not_implemented(inv: Invocation) -> int:
+    """Fail closed: a command whose owner issue has not landed never reports success."""
+    emit_error(
+        inv.json,
+        error_envelope(
+            "internal", "command not implemented", retryable=False, unknown_outcome=False
+        ),
+    )
+    return 1
+
+
+def _send(inv: Invocation) -> int:
+    # TODO(#27): the send flow (config, input, render, request, output, log). #27 must treat an
+    # empty or nonexistent --config as config_invalid (details.key "--config") and an empty or
+    # nonexistent --file as exit 2 usage at step 3 (after the disabled check).
+    return _not_implemented(inv)
+
+
+def _validate(inv: Invocation) -> int:
+    # TODO(#28): the validate command.
+    return _not_implemented(inv)
+
+
+HANDLERS: dict[str, Callable[[Invocation], int]] = {"send": _send, "validate": _validate}
 
 
 def main(
@@ -28,17 +476,19 @@ def main(
     env: Mapping[str, str] | None = None,
     gateway: Gateway | None = None,
 ) -> int:
-    """Run the CLI. ``env`` and ``gateway`` default to the process environment and the real
-    gateway; process tests pass their own (no test-only environment seam exists).
-
-    TODO(#6): thread ``env`` and ``gateway`` into the command handlers; they are unused until
-    the commands exist.
-    """
-    _env = dict(os.environ) if env is None else env
-    _gateway = RealGateway() if gateway is None else gateway
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    if args.command is None:
-        parser.print_help(sys.stderr)
+    """Run the CLI and return the exit code. ``env`` and ``gateway`` default to the process
+    environment and the real gateway; process tests pass their own (no test-only environment seam
+    exists). Both are threaded to the command handlers through ``Invocation``."""
+    args = sys.argv[1:] if argv is None else list(argv)
+    environment = dict(os.environ) if env is None else env
+    gw = RealGateway() if gateway is None else gateway
+    # TODO(#7): unexpected exceptions (also from parse: gateway.isatty, login_name) must be caught
+    # here as exit 1 internal with the envelope; only _ParserExit and UsageError are handled now.
+    try:
+        inv = parse(args, environment, gw)
+    except _ParserExit as done:
+        return done.status
+    except UsageError as err:
+        emit_error(wants_json(args), error_envelope("usage", err.message))
         return 2
-    return 0
+    return HANDLERS[inv.command](inv)

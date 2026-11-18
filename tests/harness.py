@@ -12,7 +12,8 @@ is refused when the `CI` environment variable is set, so CI can never rewrite wh
 to check. A symlink at any component below the golden root is refused in both modes.
 
 TODO(#30): golden files for every --json output, request body and log record.
-TODO(#6): golden files for the CLI (version, usage errors).
+Usage-error goldens (#6) live in tests/golden/output/usage-*.json; the version line is not a
+golden because the release job bumps the version (tests/test_cli.py compares with pyproject).
 TODO(#7): golden files for send and validate output.
 """
 

@@ -165,8 +165,8 @@ class _Tripwire:
 
 
 def test_main_usage_error_touches_no_gateway_method() -> None:
-    # TODO(#6): once the commands exist, wire the same tripwire through the command handlers;
-    # criterion wiring (env and gateway reaching the commands) lands in #6.
+    # The tripwire also covers every usage error in tests/test_cli.py; env and gateway reach the
+    # handlers through cli.Invocation (test_env_and_gateway_reach_the_handler).
     assert main(["--json"], {}, _Tripwire()) == 2  # type: ignore[arg-type]
     assert main([], {}, _Tripwire()) == 2  # type: ignore[arg-type]
 
