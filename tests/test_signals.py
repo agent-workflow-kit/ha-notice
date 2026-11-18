@@ -20,6 +20,7 @@ from ha_notice.cli import main
 from ha_notice.deadline import Kind, run_with_deadline
 from ha_notice.gateway import HANDLED_SIGNALS, RealGateway
 from ha_notice.hass import RawResponse
+from ha_notice.output import flush_streams
 from ha_notice.response import Gate, Op
 from ha_notice.signals import SignalReceived, SignalState, install, signal_exit_code
 from tests.fake_gateway import FakeGateway, StallingSource
@@ -38,7 +39,9 @@ def test_the_handled_signals_are_exactly_the_three() -> None:
     assert set(HANDLED_SIGNALS) == set(SIGNALS)
 
 
-def test_the_first_signal_wins() -> None:
+def test_the_first_recorded_signal_wins() -> None:
+    # CPython runs Python handlers in ascending signal number when several are pending together,
+    # so the first one recorded (not the first one sent) decides.
     state = SignalState()
     assert state.signum is None and state.exit_code is None and not state.stopped()
     state.check()  # nothing received: no raise
@@ -217,7 +220,9 @@ def test_a_signal_during_a_file_read(
     assert (code, out) == (143, "")
 
 
-def test_first_signal_decides_the_code(capsys: pytest.CaptureFixture[str], cfg: str) -> None:
+def test_first_recorded_signal_decides_the_code(
+    capsys: pytest.CaptureFixture[str], cfg: str
+) -> None:
     fake = FakeGateway(sources={0: StallingSource(b"")})
     fake.schedule_signal(fake.now + 0.5, signal.SIGHUP)
     fake.schedule_signal(fake.now + 0.6, signal.SIGTERM)
@@ -225,14 +230,34 @@ def test_first_signal_decides_the_code(capsys: pytest.CaptureFixture[str], cfg: 
     assert code == 129
 
 
-def test_a_signal_is_never_logged(
-    capsys: pytest.CaptureFixture[str], cfg: str, tmp_path: Path
+def test_a_signal_before_the_send_touches_no_state_directory_or_log(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    fake = FakeGateway(sources={0: StallingSource(b"")})
+    path = tmp_path / "live.yaml"
+    path.write_text(
+        "enabled: true\ntimeout: 30s\nbase_url: https://ha.example.org\nservice: phone\n",
+        encoding="utf-8",
+    )
+    cfg = str(path)
+    touched: list[str] = []
+
+    class Spy(FakeGateway):
+        def open_state_dir(self, home: str) -> int:
+            touched.append("open_state_dir")
+            return super().open_state_dir(home)
+
+        def open_state_file(self, dir_fd: int, name: str, *, append: bool = False) -> int:
+            touched.append("open_state_file")
+            return super().open_state_file(dir_fd, name, append=append)
+
+        def write_fd(self, fd: int, data: bytes) -> int:
+            touched.append("write_fd")
+            return super().write_fd(fd, data)
+
+    fake = Spy(sources={0: StallingSource(b"")})
     fake.schedule_signal(fake.now + 0.5, signal.SIGTERM)
-    _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
-    assert fake.exits == []
-    assert not (tmp_path / ".local").exists()
+    code, _, _ = _run(capsys, ["--json", "--config", cfg, "send"], fake)
+    assert code == 143 and touched == [] and fake.exits == []
 
 
 def test_without_a_signal_the_handlers_are_restored_too(
@@ -278,6 +303,135 @@ def test_system_exit_is_an_internal_error_without_its_text(
 
     code, out, err = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], Exits())
     assert code == 1 and "secret" not in out + err
+
+
+@pytest.mark.parametrize("phase", ["read_source", "load", "render"])
+@pytest.mark.parametrize("exc", [RuntimeError("boom"), SystemExit("secret")])
+def test_an_unexpected_exception_after_a_signal_is_still_the_signal(
+    capsys: pytest.CaptureFixture[str],
+    cfg: str,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    exc: BaseException,
+) -> None:
+    fake = Hooked(sources={0: b'{"message":"hi"}'})
+
+    def fail_after_signal(*a: Any, **k: Any) -> Any:
+        fake.deliver_signal(signal.SIGTERM)
+        raise exc
+
+    if phase == "read_source":
+        fake.read_source = fail_after_signal  # type: ignore[method-assign]
+    else:
+        monkeypatch.setattr(f"ha_notice.send.{phase}", fail_after_signal)
+    code, out, err = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
+    assert (code, out, err) == (143, "", "")
+    assert fake.handlers == {}
+
+
+def test_a_system_exit_while_parsing_is_an_internal_error(
+    capsys: pytest.CaptureFixture[str], cfg: str
+) -> None:
+    class Exits(FakeGateway):
+        def isatty(self, fd: int) -> bool:
+            raise SystemExit("secret text")
+
+    code, out, err = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], Exits())
+    assert code == 1 and "secret" not in out + err and "internal" in out
+
+
+def test_handlers_stay_installed_through_the_final_flush(
+    capsys: pytest.CaptureFixture[str], cfg: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeGateway(sources={0: b'{"message":"hi"}'})
+    seen: list[bool] = []
+    real_flush = flush_streams
+
+    def flush() -> None:
+        seen.append(fake.deliver_signal(signal.SIGTERM))  # a late signal, during the flush
+        real_flush()
+
+    monkeypatch.setattr("ha_notice.cli.flush_streams", flush)
+    code, out, _ = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
+    assert code == 0 and json.loads(out)["outcome"] == "dry_run"
+    assert seen[0] is True  # the flag-only handler was still installed at the flush
+    assert fake.handlers == {} and fake.restore_count == 1
+
+
+def test_a_keyboard_interrupt_in_the_final_flush_keeps_the_exit_code(
+    capsys: pytest.CaptureFixture[str], cfg: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeGateway(sources={0: b'{"message":"hi"}'})
+
+    def flush() -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("ha_notice.cli.flush_streams", flush)
+    code, out, _ = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
+    assert code == 0 and json.loads(out)["outcome"] == "dry_run"
+
+
+def test_a_keyboard_interrupt_in_restore_yields_to_the_recorded_signal() -> None:
+    class Interrupting(FakeGateway):
+        def install_signal_handlers(self, signals: Any, on_signal: Any) -> Any:
+            super().install_signal_handlers(signals, on_signal)
+
+            def restore() -> None:
+                raise KeyboardInterrupt
+
+            return restore
+
+    state = SignalState()
+    with pytest.raises(SignalReceived) as raised, install(Interrupting(), state):
+        state.handler(signal.SIGHUP)
+    assert raised.value.code == 129
+    with pytest.raises(KeyboardInterrupt), install(Interrupting(), SignalState()):
+        pass
+
+
+def _trace_signal_calls(monkeypatch: pytest.MonkeyPatch, fail_for: int | None = None) -> list[int]:
+    calls: list[int] = []
+    real = signal.signal
+
+    def traced(signum: int, action: Any) -> Any:
+        calls.append(signum)
+        if signum == fail_for and action in (signal.SIG_DFL, signal.SIG_IGN):
+            raise OSError("restore failed")
+        return real(signum, action)
+
+    monkeypatch.setattr(signal, "signal", traced)
+    return calls
+
+
+def test_real_gateway_installs_sigint_first_and_restores_it_last(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = {s: signal.getsignal(s) for s in SIGNALS}
+    calls = _trace_signal_calls(monkeypatch)
+    restore = RealGateway().install_signal_handlers(HANDLED_SIGNALS, lambda s: None)
+    restore()
+    monkeypatch.undo()
+    assert calls[0] == signal.SIGINT and calls[-1] == signal.SIGINT and len(calls) == 6
+    assert {s: signal.getsignal(s) for s in SIGNALS} == before
+
+
+def test_real_gateway_restore_continues_after_one_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = {s: signal.getsignal(s) for s in SIGNALS}
+    calls = _trace_signal_calls(monkeypatch, fail_for=signal.SIGTERM)
+    restore = RealGateway().install_signal_handlers(HANDLED_SIGNALS, lambda s: None)
+    try:
+        with pytest.raises(OSError):
+            restore()
+        monkeypatch.undo()
+        assert signal.getsignal(signal.SIGINT) == before[signal.SIGINT]
+        assert signal.getsignal(signal.SIGHUP) == before[signal.SIGHUP]
+    finally:
+        monkeypatch.undo()
+        for s, h in before.items():
+            signal.signal(s, h)
+    assert calls.count(signal.SIGINT) == 2
 
 
 # --- the stop seam of the deadline ---------------------------------------------------------

@@ -9,9 +9,11 @@ no network, no state directory, no log. The environment is never consulted here.
 
 TODO(#27): everything after ``deliver`` is called (token, POST, result mapping, output, log).
 Signals (``signals.py``): a signal before the send starts is exit 128+N with no envelope and no
-log record, noticed at the checkpoints below (``inv.signals.check()``) and, during input, through
-``remaining`` returning 0. TODO(#27): during the send the stop path (``SignalState.stopped`` as
-``run_with_deadline(stop=...)``) decides by the gate state, and a signal exit is never logged.
+log record (a 128+N exit is never logged), noticed at the checkpoints below
+(``inv.signals.check()``) and, during input, through ``remaining`` returning 0. TODO(#27):
+during the send the stop path (``SignalState.stopped`` as
+``run_with_deadline(stop=...)``) decides by the gate state; that result, log step
+included, follows docs/interface.md (Deadline).
 """
 
 from __future__ import annotations
@@ -65,7 +67,7 @@ class Plan:
 def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
     """Steps 5 to 7: token, POST, result mapping, output and log. TODO(#27).
 
-    TODO(#27): ``inv.signals.check()`` before the worker starts (step 6); after it, pass
+    TODO(#27): call ``inv.signals.check()`` immediately before the worker starts (step 6); pass
     ``stop=inv.signals.stopped`` to ``run_with_deadline`` and report the gate's result.
     """
     inv.signals.check()

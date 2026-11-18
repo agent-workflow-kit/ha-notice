@@ -749,12 +749,24 @@ class RealGateway:
             on_signal(signum)
 
         def restore() -> None:
+            # Last installed, first restored: SIGINT was installed first, so it is restored last
+            # and a KeyboardInterrupt cannot arise while another handler is still ours. One
+            # failure does not skip the others; the first one is raised afterwards.
+            errors: list[BaseException] = []
             while previous:
                 signum, old = previous.popitem()
-                signal.signal(signum, signal.SIG_DFL if old is None else old)
+                try:
+                    signal.signal(signum, signal.SIG_DFL if old is None else old)
+                except BaseException as exc:  # noqa: BLE001 - re-raised below
+                    errors.append(exc)
+            if errors:
+                raise errors[0]
 
+        # SIGINT first: once its handler is in place a KeyboardInterrupt can no longer arrive
+        # between an installation and its record in ``previous``.
+        ordered = sorted(signals, key=lambda signum: signum != signal.SIGINT)
         try:
-            for signum in signals:
+            for signum in ordered:
                 previous[signum] = signal.signal(signum, handler)
         except ValueError:  # not the main thread: no handler can be installed
             restore()

@@ -425,6 +425,15 @@ HANDLER_EXIT_CODES = frozenset(
 )
 
 
+def _flush_quietly() -> None:
+    """The last flush. A KeyboardInterrupt here (a SIGINT that beat the handler) is ignored: the
+    result was already reported, so the exit code stays."""
+    try:
+        flush_streams()
+    except KeyboardInterrupt:
+        pass
+
+
 def _run(args: list[str], environment: Mapping[str, str], gw: Gateway) -> int:
     reset_emitted()  # a direct call must not see state leaked from an earlier run
     try:
@@ -433,22 +442,26 @@ def _run(args: list[str], environment: Mapping[str, str], gw: Gateway) -> int:
         return done.status
     except UsageError as err:
         return fail(wants_json(args), "usage", message=err.message)
-    except Exception:  # noqa: BLE001 - e.g. gateway.isatty or login_name; nothing of it is printed
+    except (Exception, SystemExit):  # noqa: BLE001 - e.g. gateway.isatty; nothing of it is printed
         return fail(wants_json(args), "internal")
-    try:
-        # Installed after parsing: a usage error touches no gateway method. A signal during the
-        # parse has the OS default action (SIGINT: KeyboardInterrupt, mapped in ``main``).
-        with install(gw, inv.signals):
+    # Installed after parsing: a usage error touches no gateway method. A signal during the parse
+    # has the OS default action (SIGINT: KeyboardInterrupt, mapped in ``main``). The handlers stay
+    # (flag-only) until after the flush, so a late signal cannot kill the process after the result.
+    with install(gw, inv.signals):
+        try:
             inv.signals.check()
             code = HANDLERS[inv.command](inv)
-        if type(code) is not int or code not in HANDLER_EXIT_CODES:
-            raise ValueError("a handler returned something that is not an exit code")
-    except (Exception, SystemExit):  # noqa: BLE001 - the class and text are never printed
-        # SignalReceived and KeyboardInterrupt are not caught here: main maps them to 128+N.
-        done = emitted_exit()
-        if done is not None:  # one envelope per run: the handler already printed its own
-            return done
-        return fail(inv.json, "internal", after_writing=inv.progress.writing)
+            if type(code) is not int or code not in HANDLER_EXIT_CODES:
+                raise ValueError("a handler returned something that is not an exit code")
+        except (Exception, SystemExit):  # noqa: BLE001 - the class and text are never printed
+            # SignalReceived and KeyboardInterrupt are not caught here: main maps them to 128+N.
+            inv.signals.check()  # a signal wins over whatever it interrupted
+            done = emitted_exit()
+            if done is not None:  # one envelope per run: the handler already printed its own
+                code = done
+            else:
+                code = fail(inv.json, "internal", after_writing=inv.progress.writing)
+        _flush_quietly()
     return code
 
 
@@ -477,5 +490,5 @@ def main(
         code = signal_exit_code(2)  # 130, the shell's code for SIGINT
     except Exception:  # noqa: BLE001 - last resort
         code = EXIT_INTERNAL
-    flush_streams()
+    _flush_quietly()  # a late SIGINT (handlers gone) must not change the code
     return code

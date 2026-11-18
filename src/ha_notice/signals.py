@@ -1,20 +1,27 @@
 """Signals (issue #26, docs/interface.md, Home Assistant edge, Deadline).
 
 SIGINT, SIGTERM and SIGHUP are handled once. The handler only records the signal number in a
-list (``list.append`` is one atomic step, so the first signal wins even if a second handler
-interrupts the first); it does no I/O, takes no lock and cannot raise. Everything else happens on
+list (``list.append`` is one atomic step, so no record is lost even if a second handler
+interrupts the first; the first recorded signal decides. When several distinct signals are pending
+together CPython runs their handlers in ascending signal number, so the lowest is recorded
+first); it does no I/O, takes no lock and cannot raise. Everything else happens on
 the main thread when it looks at the flag:
 
 - Before the send starts (up to step 6, so also while input is read) a signal is exit 128+N with
-  no envelope, no request and no log record: the code calls ``check`` at each point where it can
-  stop, and ``remaining`` (see ``bound``) returns 0 so a blocked read ends within one slice.
+  no envelope, no request and no log record (a 128+N exit is never logged): the code calls
+  ``check`` at each point where it can stop, and ``remaining`` (see ``bound``) returns 0 so a
+  blocked read ends within one slice.
 - During the send the flag is the ``stop`` callable of ``deadline.run_with_deadline``: the main
-  thread polls it every 100 ms and decides like the deadline, by the gate state. A signal exit
-  128+N is never logged. TODO(#27): the send flow wires ``SignalState.stopped`` there.
+  thread polls it every 100 ms and decides like the deadline, by the gate state. That result
+  is #27's and follows docs/interface.md (Deadline), log step included. TODO(#27): the send flow
+  wires ``SignalState.stopped`` there.
 
 Handlers are installed and restored through the gateway (``install``) and are restored on every
-path. The default action of a signal that arrives before ``install`` is the OS's (143 for SIGTERM
-from a shell); a SIGINT then reaches ``cli.main`` as ``KeyboardInterrupt`` and is mapped to 130.
+path; ``cli`` keeps them (flag-only) until after the final stream flush, so a late signal cannot
+kill the process after the result was reported. The residual is interpreter shutdown after
+``main`` returns. The default action of a signal that arrives before ``install`` is the OS's (143
+for SIGTERM from a shell); a SIGINT then reaches ``cli.main`` as ``KeyboardInterrupt`` and is
+mapped to 130.
 """
 
 from __future__ import annotations
@@ -91,4 +98,8 @@ def install(gateway: Gateway, state: SignalState) -> Iterator[SignalState]:
     try:
         yield state
     finally:
-        restore()
+        try:
+            restore()
+        except KeyboardInterrupt:
+            state.check()  # a recorded signal's 128+N wins over the interrupt
+            raise
