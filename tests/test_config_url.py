@@ -90,6 +90,7 @@ def test_base_url_good(text: str, scheme: str, host: str, port: str | None, pref
 
 def test_base_url_derived_parts() -> None:
     plain = config.parse_base_url("HTTPS://HA.example/")
+    assert plain is not None
     assert plain == BaseUrl("https", "ha.example", None, "", False)
     assert (plain.port, plain.authority) == (443, "ha.example")
     assert plain.request_path("mobile_app_x") == "/api/services/notify/mobile_app_x"
@@ -230,7 +231,11 @@ def test_base_url_that_is_not_a_string_is_refused() -> None:
 
 
 def test_base_url_hostile_input_is_fast() -> None:
-    for text in ["https://" + "a." * 1000 + "!", "https://x/" + "a/" * 1000 + "!", "https://x" + "/" * 2000]:
+    for text in [
+        "https://" + "a." * 1000 + "!",
+        "https://x/" + "a/" * 1000 + "!",
+        "https://x" + "/" * 2000,
+    ]:
         config.parse_base_url(text)
 
 
@@ -709,7 +714,12 @@ def test_token_never_appears_in_any_repr(gw: FakeGateway, home: Path) -> None:
 def test_token_env_is_never_taken_from_the_environment(gw: FakeGateway, home: Path) -> None:
     # There are no HA_NOTICE_* overrides: the name comes from the config alone.
     cfg = cfg_with(gw, home, "token_env: HA_CFG\n")
-    env = {"HA_NOTICE_TOKEN_ENV": "HA_ENV", "HA_ENV": "x", "HA_NOTICE_TOKEN": "y", "HA_CFG": FAKE_TOKEN}
+    env = {
+        "HA_NOTICE_TOKEN_ENV": "HA_ENV",
+        "HA_ENV": "x",
+        "HA_NOTICE_TOKEN": "y",
+        "HA_CFG": FAKE_TOKEN,
+    }
     assert cfg.read_token(env) == FAKE_TOKEN
     assert cfg.token_env == "HA_CFG"
     with pytest.raises(CredentialError):

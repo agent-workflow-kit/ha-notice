@@ -414,11 +414,11 @@ def test_strict_loader_table_is_config_invalid(gw: FakeGateway, home: Path, text
         ("timeout: 1.5\n", {"timeout": 1.5}),
         ("timeout: 2s\n", {"timeout": "2s"}),
         ("max_chars: 1000\n", {"max_chars": 1000}),
-        ("service: mobile_app_x\n", {"service": "mobile_app_x"}),
-        ("service: 'true'\n", {"service": "true"}),
-        ("service: no\n", {"service": "no"}),  # stays the string "no"
-        ("service: 010\n", {"service": "010"}),
-        ("service: 2001-01-01\n", {"service": "2001-01-01"}),
+        ("level_prefix:\n  info: mobile_app_x\n", {"level_prefix": {"info": "mobile_app_x"}}),
+        ("level_prefix:\n  info: 'true'\n", {"level_prefix": {"info": "true"}}),
+        ("level_prefix:\n  info: no\n", {"level_prefix": {"info": "no"}}),  # stays the string "no"
+        ("level_prefix:\n  info: 010\n", {"level_prefix": {"info": "010"}}),
+        ("level_prefix:\n  info: 2001-01-01\n", {"level_prefix": {"info": "2001-01-01"}}),
         ("base_url: https://h.example:8123\n", {"base_url": "https://h.example:8123"}),
         (
             "link_hosts: [a.example.org, b.example.org]\n",
@@ -428,12 +428,12 @@ def test_strict_loader_table_is_config_invalid(gw: FakeGateway, home: Path, text
         ("level_prefix:\n  info: ''\n", {"level_prefix": {"info": ""}}),
         ("# comment\nlog: false # trailing\n", {"log": False}),
         ("﻿log: false\n", {"log": False}),
-        ("service: trueish\n", {"service": "trueish"}),
-        ("service: falsey\n", {"service": "falsey"}),
-        ("service: nullable\n", {"service": "nullable"}),
-        ("service: ~x\n", {"service": "~x"}),
-        ("service: 1.5.2\n", {"service": "1.5.2"}),
-        ('service: "café"\n', {"service": "café"}),
+        ("level_prefix:\n  info: trueish\n", {"level_prefix": {"info": "trueish"}}),
+        ("level_prefix:\n  info: falsey\n", {"level_prefix": {"info": "falsey"}}),
+        ("level_prefix:\n  info: nullable\n", {"level_prefix": {"info": "nullable"}}),
+        ("level_prefix:\n  info: ~x\n", {"level_prefix": {"info": "~x"}}),
+        ("level_prefix:\n  info: 1.5.2\n", {"level_prefix": {"info": "1.5.2"}}),
+        ('level_prefix:\n  info: "café"\n', {"level_prefix": {"info": "café"}}),
     ],
 )
 def test_strict_loader_accepts(
@@ -450,9 +450,9 @@ def test_strict_loader_accepts(
 )
 def test_non_decimal_spellings_stay_strings(gw: FakeGateway, home: Path, value: str) -> None:
     # The loader leaves them strings (tests/test_config_keys.py: the duration grammar refuses them
-    # for a duration key); a string key such as ``service`` shows what the loader itself returns.
-    write_main(home, f"service: {value}\n")
-    assert config.load(gw, None).values == {"service": value}
+    # for a duration key); a ``level_prefix`` member shows what the loader itself returns.
+    write_main(home, f"level_prefix:\n  info: {value}\n")
+    assert config.load(gw, None).values == {"level_prefix": {"info": value}}
 
 
 def test_booleans_are_never_numbers(gw: FakeGateway, home: Path) -> None:

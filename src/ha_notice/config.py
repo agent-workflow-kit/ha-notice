@@ -22,10 +22,10 @@ Rules kept here (docs/interface.md, Config):
   refused), ``level_prefix`` members (at most 16 characters that the sanitizer's title rule leaves
   unchanged), ``default_group`` and
   ``max_chars``. Every pattern is a full match (``re.fullmatch``, never ``$``). The error names the
-  key and never the value. ``base_url``, ``service``, ``token_env`` and ``ca_file`` follow (issue #10,
-  below); TODO(#16): ``link_hosts``.
-- The token is never read by ``load``; ``Config.read_token`` reads it from the injected environment
-  mapping, from the variable ``token_env`` names and no other.
+  key and never the value. ``base_url``, ``service``, ``token_env`` and ``ca_file`` follow (issue
+  #10, below); TODO(#16): ``link_hosts``.
+- The token is never read by ``load``; ``Config.read_token`` reads it from the injected
+  environment mapping, from the variable ``token_env`` names and no other.
 """
 
 from __future__ import annotations
