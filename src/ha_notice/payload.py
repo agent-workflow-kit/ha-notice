@@ -14,8 +14,8 @@ field name and ``/?`` otherwise (``output.safe_pointer``), and the reason is a f
 TODO(#12): input reading limits and the hardened JSON parse (``details.pointer`` ``""`` for a
 parse failure); it hands the parsed value to ``validate_notification``.
 The sanitizer (issue #13, docs/interface.md, Sanitizer) runs inside ``validate_notification``, so
-``Notification.title`` and ``Notification.message`` hold the sanitized text. TODO(#17): the title
-and message cut, the prefix and the budget (rendering).
+``Notification.title`` and ``Notification.message`` hold the sanitized text. The title and message
+cut, the prefix and the budget are in ``render.py`` (issue #17).
 The command-keyword check (issue #14) runs last inside ``validate_notification``, on the sanitized
 message. The link rule (issue #15) is in ``link.py`` and runs before the message checks, followed
 by the ``link_hosts`` check (issue #16); the send flow passes ``Config.link_hosts`` (TODO(#27)).
