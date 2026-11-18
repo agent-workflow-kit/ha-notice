@@ -63,8 +63,11 @@ wheels = [
 
 [[package]]
 name = "ha-notice"
-version = "0.0.1"
+version = "0.8.0"
 source = { editable = "." }
+dependencies = [
+    { name = "pyyaml" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -72,13 +75,13 @@ dev = [
     { name = "pymarkdownlnt" },
     { name = "pyright" },
     { name = "pytest" },
-    { name = "pyyaml" },
     { name = "referencing" },
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
 
 [package.metadata]
+requires-dist = [{ name = "pyyaml", specifier = ">=6" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -86,7 +89,6 @@ dev = [
     { name = "pymarkdownlnt", specifier = ">=0.9.41" },
     { name = "pyright", specifier = ">=1.1.380" },
     { name = "pytest", specifier = ">=8" },
-    { name = "pyyaml", specifier = ">=6" },
     { name = "referencing", specifier = ">=0.35" },
     { name = "ruff", specifier = ">=0.6" },
     { name = "types-pyyaml", specifier = ">=6.0.12" },
