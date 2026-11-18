@@ -45,6 +45,7 @@ from ha_notice.output import (
 )
 from ha_notice.send import run_send
 from ha_notice.signals import SignalReceived, SignalState, install, signal_exit_code
+from ha_notice.validate import run_validate
 
 __all__ = ["dumps", "emit_error", "write_text"]  # re-exported (see output.py)
 
@@ -402,18 +403,12 @@ def parse(
 # --- dispatch -------------------------------------------------------------------------------
 
 
-def _not_implemented(inv: Invocation) -> int:
-    """Fail closed: a command whose owner issue has not landed never reports success."""
-    return fail(inv.json, "internal", message="command not implemented")
-
-
 def _send(inv: Invocation) -> int:
     return run_send(inv)
 
 
 def _validate(inv: Invocation) -> int:
-    # TODO(#28): the validate command.
-    return _not_implemented(inv)
+    return run_validate(inv)
 
 
 HANDLERS: dict[str, Callable[[Invocation], int]] = {"send": _send, "validate": _validate}

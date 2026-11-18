@@ -587,14 +587,9 @@ def test_env_defaults_to_the_process_environment(monkeypatch: pytest.MonkeyPatch
     assert seen[0].env["HA_NOTICE_PROBE"] == "1"
 
 
-def test_commands_not_yet_implemented_fail_closed_as_internal(run: Any) -> None:
-    # TODO(#28) the validate command replaces this stub; until then it must never
-    # report success.
-    code, out, err = run(["--json", "validate"])
-    assert code == 1
-    assert _envelope(out)["error"]["code"] == "internal"
-    assert err.startswith("internal: ")
-    assert run(["validate"])[0] == 1
+def test_validate_is_wired_to_the_real_handler() -> None:
+    assert cli.HANDLERS["validate"] is cli._validate
+    assert cli.HANDLERS["send"] is cli._send
 
 
 # --- --version, --help ---------------------------------------------------------------------
