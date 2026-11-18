@@ -28,8 +28,14 @@ LF_SAFE_END = r"(?![\s\S])"
 # scheme rule of config.json that applies when allow_insecure_http is not true (the base_url
 # pattern itself is LF-safe). Keyed by schema name, location and exact pattern.
 PREFIX_ONLY_PATTERN = ("config", "/allOf/0/then/base_url", "^[Hh][Tt][Tt][Pp][Ss]://")
-# defs.json holds shared definitions only; its definitions are exercised through the others.
-SAMPLED = [n for n in schema_names() if n != "defs"]
+# defs.json holds shared definitions only: its samples are named `<definition>.<label>` and are
+# checked against that entry of `$defs`; every other schema is checked as a whole.
+SAMPLED = schema_names()
+
+
+def _target(name: str, key: str) -> tuple[str, str | None]:
+    """The schema and the `$defs` entry (None for a whole schema) a sample is checked against."""
+    return (name, key.split(".")[0]) if name == "defs" else (name, None)
 
 
 def _samples(name: str) -> dict[str, Any]:
@@ -103,6 +109,13 @@ def test_a_schema_has_positive_and_negative_samples(name: str) -> None:
     assert samples["valid"] and samples["invalid"]
 
 
+def test_every_definition_of_defs_has_a_positive_and_a_negative_sample() -> None:
+    samples = _samples("defs")
+    for kind in ("valid", "invalid"):
+        sampled = {key.split(".")[0] for key in samples[kind]}
+        assert sampled == set(load_schema("defs")["$defs"]), kind
+
+
 def test_every_sample_file_belongs_to_a_schema() -> None:
     files = {p.relative_to(SAMPLES).with_suffix("").as_posix() for p in SAMPLES.rglob("*.json")}
     assert files == set(SAMPLED)
@@ -111,7 +124,7 @@ def test_every_sample_file_belongs_to_a_schema() -> None:
 @pytest.mark.parametrize(("name", "key"), _cases("valid"))
 def test_positive_sample_validates(name: str, key: str) -> None:
     instance = _samples(name)["valid"][key]
-    assert [e.message for e in schema_errors(name, instance)] == []
+    assert [e.message for e in schema_errors(name, instance, _target(name, key)[1])] == []
 
 
 @pytest.mark.parametrize(("name", "key"), _cases("invalid"))
@@ -120,7 +133,7 @@ def test_negative_sample_is_rejected_at_its_named_location_for_its_named_keyword
 ) -> None:
     sample = _samples(name)["invalid"][key]
     assert set(sample) == {"instance", "path", "keyword"}
-    pairs = schema_error_pairs(name, sample["instance"])
+    pairs = schema_error_pairs(name, sample["instance"], _target(name, key)[1])
     assert pairs, "negative sample was accepted"
     assert (tuple(sample["path"]), sample["keyword"]) in pairs, (
         f"expected {sample['keyword']} at {sample['path']}, got {sorted(map(str, pairs))}"
