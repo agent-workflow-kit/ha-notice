@@ -2,9 +2,9 @@
 
 One attempt is: connect (name resolution, TCP, TLS), build the request, write it, read the
 answer up to a cap. This module owns the wire shape (URL path, headers, body bytes) and the TLS
-trust; it does not classify an answer (``response.py``), retry (TODO(#24)) or enforce the whole-send
-deadline and the writing gate (TODO(#25)). The gate sits between ``open_connection`` and the
-request through the ``before_write`` hook of ``exchange``.
+trust; it does not classify an answer (``response.py``), retry (``retry.py``) or enforce the
+whole-send deadline and the writing gate (TODO(#25)). The gate sits between ``open_connection``
+and the request through the ``before_write`` hook of ``exchange``.
 
 Rules kept here (docs/interface.md, Home Assistant edge):
 
@@ -277,8 +277,8 @@ def exchange(
 
     ``before_write`` runs after the headers are built and before the first call that can put a
     byte on the socket (TODO(#25): the idle-to-writing gate step; it may raise to refuse).
-    Nothing is retried and nothing is classified here (``response.py``, TODO(#24)). TODO(#25): bound
-    the 100-Continue loop with the overall deadline (see ``_read_capped``).
+    Nothing is retried and nothing is classified here (``response.py``, ``retry.py``).
+    TODO(#25): bound the 100-Continue loop with the overall deadline (see ``_read_capped``).
     """
     try:
         headers = request_headers(target, body=body)

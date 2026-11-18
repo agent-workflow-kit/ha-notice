@@ -277,7 +277,7 @@ def test_drop_after_the_request_is_remote_disconnected(ha: FakeHA) -> None:
     with pytest.raises(http.client.RemoteDisconnected):
         exchange(ha)
     assert len(ha.wait_for_requests(1)) == 1
-    # TODO(#24): a drop once the gate is writing is outcome_unknown and is never retried.
+    # (a drop once the gate is writing is never retried: tests/test_retry.py)
 
 
 def test_a_reset_after_the_request_is_a_connection_reset_not_a_clean_close(ha: FakeHA) -> None:
