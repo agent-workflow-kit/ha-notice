@@ -31,6 +31,8 @@ Input that does not arrive within the deadline (a producer that stalls) exits 12
 
 Fields: an unknown field, a field of the wrong type (null is a wrong type: absent fields are omitted), a level outside `info`, `warn`, `action`, `error`, or a title or message of more than 100000 characters exits 20 `invalid_payload` with `details.pointer` set to `/<field>` (a field name that does not match `[A-Za-z0-9_-]{1,64}` is reported as `/?`). A flag value is checked like the same JSON field and uses the same pointer. A message that is absent or empty after sanitizing is `empty_message` (reason `empty_message`, no pointer; the schema has no `minLength` for it). Error messages and details never contain an input value, only the pointer and the rule.
 
+The checks run in a fixed order, so the pointer does not depend on the order of keys in the input: not an object, unknown fields (the smallest name when several), title, message, level, link types and limits, then `empty_message`.
+
 The tool may exit without reading all of stdin (a refusal before step 3, an over-size input, any exit 20), so a caller ignores EPIPE and SIGPIPE on the stdin write.
 
 Flag text is untrusted and goes through the same [sanitizer](#sanitizer) as stdin text; flags exist for humans. ha-notice never forwards free-form data.

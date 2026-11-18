@@ -78,6 +78,7 @@ def test_unknown_field_wins_over_empty_message() -> None:
         "a/b",
         "~0",
         "a\nb",
+        "x\n",
         "\ud800",
         "😀",
         "/x",
@@ -87,8 +88,9 @@ def test_unknown_field_wins_over_empty_message() -> None:
 def test_hostile_unknown_field_name_is_pointer_question_mark(key: str) -> None:
     err = refusal({"message": "a", key: 1})
     assert err.pointer == "/?"
-    text = dumps(err.to_error().envelope)
-    assert len(key) < 4 or key not in text
+    # the key appears nowhere: the envelope equals the one for a different hostile key
+    other = refusal({"message": "a", "other hostile key!": 1})
+    assert dumps(err.to_error().envelope) == dumps(other.to_error().envelope)
 
 
 def test_plain_unknown_field_name_boundary() -> None:
@@ -117,6 +119,19 @@ def test_refusal_is_independent_of_key_order() -> None:
     items = [("title", 1), ("message", 2), ("level", "bad"), ("link", None)]
     pointers = {refusal(dict(order)).pointer for order in itertools.permutations(items)}
     assert pointers == {"/title"}
+
+
+@pytest.mark.parametrize(
+    ("obj", "pointer"),
+    [
+        ({"message": 2, "level": "bad"}, "/message"),
+        ({"level": "bad", "link": 1}, "/level"),
+        ({"link": 1, "level": "bad"}, "/level"),
+        ({"level": "bad", "message": 2}, "/message"),
+    ],
+)
+def test_check_order_is_message_then_level_then_link(obj: dict[str, Any], pointer: str) -> None:
+    assert_invalid(obj, pointer)
 
 
 def test_a_non_string_key_is_unusable() -> None:
@@ -246,6 +261,8 @@ def test_a_whitespace_only_message_is_not_judged_here() -> None:
         {"message": "m", "level": "error", "link": "https://a.example/"},
         {"message": "héllo\n😀", "title": "t\ttab", "level": "action"},
         {"message": "x" * 100000},
+        {"message": "m", "title": ""},
+        {"message": "m", "link": ""},
     ],
 )
 def test_flags_and_json_give_the_same_notification(fields: dict[str, str]) -> None:
@@ -255,7 +272,11 @@ def test_flags_and_json_give_the_same_notification(fields: dict[str, str]) -> No
         level=fields.get("level"),
         link=fields.get("link"),
     )
-    assert from_flags == validate_notification(json.loads(json.dumps(fields)))
+    from_json = validate_notification(json.loads(json.dumps(fields)))
+    assert from_flags == from_json
+    for name in ("title", "link"):
+        if fields.get(name) == "":
+            assert getattr(from_flags, name) == ""
 
 
 @pytest.mark.parametrize(
@@ -264,6 +285,7 @@ def test_flags_and_json_give_the_same_notification(fields: dict[str, str]) -> No
         {"title": "x", "message": None, "level": None, "link": None},
         {"title": None, "message": "", "level": None, "link": None},
         {"title": None, "message": "m", "level": "bad", "link": None},
+        {"title": None, "message": "m", "level": "", "link": None},
         {"title": "x" * 100001, "message": "m", "level": None, "link": None},
         {"title": None, "message": "m" * 100001, "level": None, "link": None},
     ],
