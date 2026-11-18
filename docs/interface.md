@@ -31,7 +31,7 @@ Input is read through the gateway in slices of at most 100 ms, so the main threa
 
 Input that does not arrive within the deadline (a producer that stalls) exits 12 `unavailable` with `details.phase` `input`, `retryable` true and `unknown_outcome` false: nothing was sent, and the caller owns the resend. A SIGTERM, SIGINT or SIGHUP received before the send starts exits 128+N with no envelope, sends nothing and writes no log record; the sender of the signal knows ([Deadline](#home-assistant-edge)).
 
-Fields: an unknown field, a field of the wrong type (null is a wrong type: absent fields are omitted), a level outside `info`, `warn`, `action`, `error`, or a title or message of more than 100000 characters exits 20 `invalid_payload` with `details.pointer` set to `/<field>` (a field name that does not match `[A-Za-z0-9_-]{1,64}` is reported as `/?`). A flag value is checked like the same JSON field and uses the same pointer. A message that is absent or empty after sanitizing is `empty_message` (reason `empty_message`, no pointer; the schema has no `minLength` for it). Error messages and details never contain an input value, only the pointer and the rule.
+Fields: an unknown field, a field of the wrong type (null is a wrong type: absent fields are omitted), a level outside `info`, `warn`, `action`, `error`, a title or message of more than 100000 characters, or a lone surrogate in title or message (a JSON `\ud800` escape or a flag value) exits 20 `invalid_payload` with `details.pointer` set to `/<field>` (a field name that does not match `[A-Za-z0-9_-]{1,64}` is reported as `/?`). A flag value is checked like the same JSON field and uses the same pointer. A message that is absent or empty after sanitizing is `empty_message` (reason `empty_message`, no pointer; the schema has no `minLength` for it). Error messages and details never contain an input value, only the pointer and the rule.
 
 The checks run in a fixed order, so the pointer does not depend on the order of keys in the input: not an object, unknown fields (the smallest name when several), title, message, level, link types and limits, then `empty_message`.
 
@@ -43,7 +43,7 @@ Flag text is untrusted and goes through the same [sanitizer](#sanitizer) as stdi
 
 Applied to title and message before rendering, in this order. Every pattern in this document is matched against the whole string (`re.fullmatch`); a trailing newline never passes.
 
-1. Input is read as bytes and decoded as strict UTF-8, never through the locale. Invalid UTF-8 or a lone surrogate: exit 20 refused, reason `invalid_payload`.
+1. Input is read as bytes and decoded as strict UTF-8, never through the locale. Invalid UTF-8 or a lone surrogate (also one made by a JSON `\ud800` escape or found in a flag value, which Python holds as a surrogate code point): exit 20 refused, reason `invalid_payload`, `details.pointer` `/title` or `/message` for a field and `""` for a parse failure. A lone surrogate is refused, never removed: no text that reaches step 3 holds one.
 2. CRLF, CR, U+0085, U+2028 and U+2029 become LF. The tab becomes a space.
 3. The characters in the table below are removed; nothing else is. The table and this rule are one list.
 4. Trailing whitespace of every line is removed (`str.rstrip`), then runs of more than two LF become two, then leading and trailing whitespace is removed (`str.strip`, Unicode whitespace).
@@ -52,7 +52,7 @@ Applied to title and message before rendering, in this order. Every pattern in t
 | Class | Characters | Action |
 |---|---|---|
 | Cc | every control character other than LF | Removed (the tab became a space in step 2). |
-| Cs, Co | surrogates, private use | Removed. |
+| Cs, Co | surrogates, private use | Private use is removed. A lone surrogate never reaches this step (step 1 refuses it); a valid pair is one astral character and not a Cs. The title rule applied to a `level_prefix` removes a surrogate (defence in depth; the prefix check does not use step 1's refusal), so the "must come out unchanged" check fails and the config is `config_invalid`. |
 | Cn | unassigned code points and noncharacters, including U+FDD0 to U+FDEF and U+FFFE and U+FFFF of every plane | Removed. Membership follows the running Python's Unicode tables; the golden test pins a fixed list of code points. |
 | Zl, Zp | U+2028, U+2029 | Became LF in step 2. |
 | Listed Cf and default-ignorable | U+00AD, U+061C, U+180E, U+200B, U+200E, U+200F, U+202A to U+202E, U+2060 to U+206F, U+FEFF, U+FFF9 to U+FFFB, U+E0000 to U+E007F, U+E0100 to U+E01EF; the fillers U+115F, U+1160, U+3164 and U+FFA0; U+2800; the Mongolian selectors U+180B to U+180D and U+180F | Removed. |
@@ -255,7 +255,7 @@ Schema: [schemas/config.json](../schemas/config.json); example: [config.example.
 | `allow_insecure_http` | `false` | Allow an `http://` base URL (the token then travels in cleartext). |
 | `ca_file` | unset | Extra CA bundle, an absolute path; the way to trust a self-signed server. There is no key that turns verification off. |
 | `link_hosts` | unset | List of 1 to 32 host names in lowercase, each of at least two labels `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?` joined by single dots, no leading or trailing dot, at most 253 characters; an entry that does not match is `config_invalid` (`details.key: link_hosts`). See the link rule. |
-| `level_prefix` | `{info: "", warn: "WARN:", action: "ACTION:", error: "ERROR:"}` | Title prefixes, at most 16 characters each; run through the title rule (sanitizer steps 1 to 5) and must come out unchanged, else `config_invalid`. |
+| `level_prefix` | `{info: "", warn: "WARN:", action: "ACTION:", error: "ERROR:"}` | Title prefixes, at most 16 characters each; run through the title rule (sanitizer steps 1 to 5, except that a surrogate is removed rather than refused, see the Cs, Co row) and must come out unchanged, else `config_invalid`. |
 | `default_group` | unset | `data.group` for every notification; `[A-Za-z0-9_-]{1,64}` as a whole. |
 | `max_chars` | `1000` | Message limit in code points, 100 to 2000. |
 | `timeout` | `10s` | The one deadline of a `send` ([Deadline](#home-assistant-edge)), 1s to 120s. |

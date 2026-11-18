@@ -1,4 +1,5 @@
-"""Notification validation: fields, levels and unknown fields (issue #11)."""
+"""Notification validation: fields, levels and unknown fields (issue #11); the sanitizer is in
+test_sanitizer.py (issue #13)."""
 
 from __future__ import annotations
 
@@ -240,14 +241,15 @@ def test_the_input_is_not_modified() -> None:
     assert obj == {"message": " m\n", "title": ""}
 
 
-def test_an_empty_title_is_kept_for_the_sanitizer() -> None:
-    # TODO(#13): the sanitizer turns an empty title into an absent one.
-    assert validate_notification({"message": "m", "title": ""}).title == ""
+def test_an_empty_title_is_absent() -> None:
+    assert validate_notification({"message": "m", "title": ""}).title is None
 
 
-def test_a_whitespace_only_message_is_not_judged_here() -> None:
-    # TODO(#13): whitespace-only is empty after sanitizing.
-    assert validate_notification({"message": " "}).message == " "
+def test_a_whitespace_only_message_is_empty_message() -> None:
+    assert (refusal({"message": " "}).reason, refusal({"message": "\n\t"}).pointer) == (
+        "empty_message",
+        None,
+    )
 
 
 # --- flags and stdin parity ----------------------------------------------------------------
@@ -274,9 +276,10 @@ def test_flags_and_json_give_the_same_notification(fields: dict[str, str]) -> No
     )
     from_json = validate_notification(json.loads(json.dumps(fields)))
     assert from_flags == from_json
-    for name in ("title", "link"):
-        if fields.get(name) == "":
-            assert getattr(from_flags, name) == ""
+    if fields.get("title") == "":
+        assert from_flags.title is None  # an empty title is absent (sanitizer)
+    if fields.get("link") == "":
+        assert from_flags.link == ""
 
 
 @pytest.mark.parametrize(
