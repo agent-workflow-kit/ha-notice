@@ -1,0 +1,1 @@
+{"ok":false,"enabled":true,"checks":[{"name":"config","ok":true,"message":"the configuration is usable"},{"name":"credential","ok":true,"message":"the token is set and well formed"},{"name":"test_message","ok":false,"message":"the notification was not confirmed as sent; delivery is not observable, look at the destination"}]}

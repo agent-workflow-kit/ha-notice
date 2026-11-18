@@ -236,3 +236,131 @@ def test_signals_after_main_returned_keep_the_exit_code(tmp_path: Path, home: Pa
         with FakeHA(token=TOKEN, script=script) as ha:
             done = _run_wrapper(LATE_SIGNAL_WRAPPER, config(tmp_path, ha), home, *args)
         assert done.returncode == expected
+
+
+# --- --test-message in real processes ---------------------------------------------------------
+
+
+def _posts(ha: FakeHA) -> list[Any]:
+    return [r for r in ha.requests if r.method == "POST"]
+
+
+def test_test_message_ok_over_a_real_socket_is_logged(tmp_path: Path, home: Path) -> None:
+    with FakeHA(token=TOKEN, script=[Reply(body=b"{}"), Reply()]) as ha:
+        done = validate(config(tmp_path, ha), home, "--probe", "--test-message")
+        body = json.loads(done.stdout)
+        assert done.returncode == 0 and schema_errors("cli/validate", body) == []
+        assert [c["name"] for c in body["checks"]] == [
+            "config",
+            "credential",
+            "probe",
+            "test_message",
+        ]
+        assert [r.method for r in ha.requests] == ["GET", "POST"]
+        sent = json.loads(_posts(ha)[0].body)
+        assert sent == {"title": "ha-notice", "message": "validate: test message"}
+        assert done.stderr.decode().count(INSECURE_HTTP_WARNING) == 1
+    assert [r["outcome"] for r in log_records(home)] == ["sent"]
+    assert TOKEN not in done.stdout.decode() + done.stderr.decode()
+
+
+def test_a_rejected_test_message_is_exit_12_and_logged(tmp_path: Path, home: Path) -> None:
+    with FakeHA(token="other-token-0000") as ha:
+        done = validate(config(tmp_path, ha), home, "--test-message")
+        body = json.loads(done.stdout)
+        assert done.returncode == 12 and body["checks"][-1]["ok"] is False
+        assert len(_posts(ha)) == 1
+    assert [(r["outcome"], r["code"]) for r in log_records(home)] == [("failed", "auth_required")]
+
+
+def test_a_stalled_test_message_ends_within_the_deadline_plus_three_seconds(
+    tmp_path: Path, home: Path
+) -> None:
+    with FakeHA(script=[Reply(stall_before_read=True)]) as ha:
+        started = time.monotonic()
+        done = validate(config(tmp_path, ha, timeout="1s"), home, "--test-message")
+        assert time.monotonic() - started < 4
+        body = json.loads(done.stdout)
+        assert done.returncode == 12 and body["checks"][-1]["name"] == "test_message"
+        assert body["checks"][-1]["ok"] is False
+    assert [r["outcome"] for r in log_records(home)] == ["outcome_unknown"]
+
+
+def test_disabled_test_message_is_22_with_no_call_and_no_log(tmp_path: Path, home: Path) -> None:
+    with FakeHA() as ha:
+        done = validate(
+            config(tmp_path, ha, "enabled: false\n"), home, "--test-message", env=_no_token(home)
+        )
+        assert (done.returncode, done.stdout) == (22, b'{"outcome":"disabled"}\n')
+        assert ha.connections == 0
+    assert log_records(home) == []
+
+
+def test_signals_after_the_test_message_report_keep_the_exit_code_and_the_log(
+    tmp_path: Path, home: Path
+) -> None:
+    for script, expected, outcome in (
+        ([Reply()], 0, "sent"),
+        ([Reply(status=400)], 12, "failed"),
+        ([Reply(stall_before_read=True)], 12, "outcome_unknown"),
+    ):
+        with FakeHA(token=TOKEN, script=script) as ha:
+            done = _run_wrapper(
+                AFTER_REPORT, config(tmp_path, ha, timeout="1s"), home, "--test-message"
+            )
+        assert done.returncode == expected
+        assert done.stdout.startswith(b'{"ok":')
+        assert log_records(home)[-1]["outcome"] == outcome
+
+
+def test_signals_after_main_returned_keep_the_test_message_exit_code(
+    tmp_path: Path, home: Path
+) -> None:
+    for script, expected in (([Reply()], 0), ([Reply(status=400)], 12)):
+        with FakeHA(token=TOKEN, script=script) as ha:
+            done = _run_wrapper(LATE_SIGNAL_WRAPPER, config(tmp_path, ha), home, "--test-message")
+        assert done.returncode == expected
+
+
+def test_a_signal_before_any_check_sends_no_test_message(tmp_path: Path, home: Path) -> None:
+    with FakeHA(token=TOKEN) as ha:
+        done = _run_wrapper(BEFORE_CHECKS, config(tmp_path, ha), home, "--test-message")
+        assert (done.returncode, done.stdout, done.stderr) == (143, b"", b"")
+        assert ha.connections == 0
+    assert log_records(home) == []
+
+
+def test_a_signal_during_the_test_message_is_decided_like_the_deadline(
+    tmp_path: Path, home: Path
+) -> None:
+    with FakeHA(token=TOKEN, script=[Reply(stall_before_read=True)]) as ha:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                WRAPPER,
+                "--config",
+                config(tmp_path, ha),
+                "--json",
+                "validate",
+                "--test-message",
+            ],
+            env=make_env(home),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            end = time.monotonic() + 10
+            while ha.connections == 0 and time.monotonic() < end:
+                time.sleep(0.01)
+            assert ha.connections == 1
+            time.sleep(0.3)
+            proc.send_signal(signal.SIGTERM)  # our own child, the pid we started
+            out, _ = proc.communicate(timeout=10)
+        finally:
+            if proc.poll() is None:
+                proc.kill()  # our own child; reap it if an assertion failed early
+                proc.communicate(timeout=15)
+    assert proc.returncode == 12 and json.loads(out)["checks"][-1]["ok"] is False
+    assert [r["outcome"] for r in log_records(home)] == ["outcome_unknown"]

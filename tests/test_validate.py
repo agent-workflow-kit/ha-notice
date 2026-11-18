@@ -473,23 +473,273 @@ def test_the_insecure_warning_is_printed_when_the_probe_fails(rig: Rig) -> None:
     assert err.splitlines()[0] == INSECURE_HTTP_WARNING and "probe: failed" in err
 
 
-# --- test message seam ----------------------------------------------------------------------
+# --- test message ---------------------------------------------------------------------------
+
+BODY = b'{"title":"ha-notice","message":"validate: test message"}'
+LIST = ConnectionScript(body=b"[]")  # what a send expects (a probe expects an object)
 
 
-def test_test_message_fails_closed_until_issue_29_and_sends_nothing(rig: Rig) -> None:
+def posts(gw: FakeGateway) -> list[Any]:
+    return [r for c in gw.connections for r in c.requests if r.method == "POST"]
+
+
+def methods(gw: FakeGateway) -> list[str]:
+    return [r.method for c in gw.connections for r in c.requests]
+
+
+def log_records(rig: Rig) -> list[dict[str, Any]]:
+    path = Path(rig.gw.home) / ".local" / "state" / "ha-notice" / "log.jsonl"  # type: ignore[arg-type]
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_the_default_test_message_passes_every_rule_and_is_stable() -> None:
+    from ha_notice.payload import sanitize_message, sanitize_title, validate_notification
+    from ha_notice.validate import TEST_MESSAGE, TEST_TITLE
+
+    note = validate_notification(
+        {"title": TEST_TITLE, "message": TEST_MESSAGE, "level": "info"}, []
+    )
+    assert (note.title, note.message, note.level, note.link) == (
+        "ha-notice",
+        "validate: test message",
+        "info",
+        None,
+    )
+    assert sanitize_message(TEST_MESSAGE) == TEST_MESSAGE
+    assert sanitize_title(TEST_TITLE) == TEST_TITLE
+    assert TEST_MESSAGE.isascii() and " " in TEST_MESSAGE
+
+
+def test_test_message_ok_sends_one_post_through_the_normal_path(rig: Rig, golden: Golden) -> None:
+    rig.gw.default_script = LIST
     code, out, err = rig.run(["--json", "validate", "--test-message"])
-    assert code == 1 and "internal error" in err
-    assert json.loads(out)["error"]["code"] == "internal"
-    assert rig.gw.connections == []
+    assert (code, err) == (0, "")
+    golden.check("output", "validate-test-message-ok.json", out, schema="cli/validate")
+    request = only_request(rig.gw)
+    assert (request.method, request.path) == ("POST", "/api/services/notify/mobile_app_x")
+    golden.check("request", "validate-test-message.json", request.body.decode())
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    assert headers["authorization"] == f"Bearer {TOKEN}"
+    assert headers["content-type"] == "application/json"
 
 
-def test_test_message_is_not_reached_after_a_failed_check(rig: Rig) -> None:
-    code, out, _ = rig.run(["--json", "validate", "--test-message", "--probe"], env={})
-    assert code == 12 and names(out) == ["config", "credential"]
+def test_test_message_uses_the_config_group_like_any_send(rig: Rig) -> None:
+    rig.gw.default_script = LIST
+    config = rig.cfg(BASE + "default_group: ops\n")
+    assert rig.run(["--json", "validate", "--test-message"], config=config)[0] == 0
+    assert json.loads(only_request(rig.gw).body)["data"] == {"group": "ops"}
+
+
+def test_test_message_is_logged_like_a_send_and_never_records_content(
+    rig: Rig, golden: Golden
+) -> None:
+    rig.gw.default_script = LIST
+    rig.run(["--json", "validate", "--test-message", "--actor", "human:tester"])
+    path = Path(rig.gw.home) / ".local" / "state" / "ha-notice" / "log.jsonl"  # type: ignore[arg-type]
+    text = path.read_text(encoding="utf-8")
+    assert "validate" not in text and "test message" not in text and TOKEN not in text
+    record = json.loads(text)
+    assert schema_errors("log", record) == []
+    assert (record["outcome"], record["exit"], record["level"], record["tag_set"]) == (
+        "sent",
+        0,
+        "info",
+        False,
+    )
+    assert record["dedupe_key_sha256"] is None and record["bytes"] == len(BODY)
+    assert (record["actor"], record["actor_source"]) == ("human:tester", "flag")
+    from ha_notice import __version__
+
+    golden.check(
+        "log",
+        "validate-test-message-sent.jsonl",
+        text.replace(f'"version":"{__version__}"', '"version":"0.1.0"'),
+        schema="log",
+    )
+
+
+def test_test_message_with_log_false_writes_no_log(rig: Rig) -> None:
+    rig.gw.default_script = LIST
+    assert rig.run(["validate", "--test-message"], config=rig.cfg(BASE + "log: false\n"))[0] == 0
+    assert log_records(rig) == []
+
+
+def test_dry_run_does_not_stop_the_test_message(rig: Rig) -> None:
+    rig.gw.default_script = LIST
+    code, out, _ = rig.run(["--dry-run", "--json", "validate", "--test-message"])
+    assert code == 0 and names(out) == ["config", "credential", "test_message"]
+    assert len(posts(rig.gw)) == 1 and len(log_records(rig)) == 1
+
+
+def test_human_output_says_delivery_is_not_observable(rig: Rig) -> None:
+    rig.gw.default_script = LIST
+    code, out, err = rig.run(["validate", "--test-message"])
+    assert code == 0 and out == ""
+    last = err.splitlines()[-1]
+    assert last.startswith("test_message: ok: ") and "not observable" in last
+    assert "destination" in last
+    assert rig.run(["--quiet", "validate", "--test-message"])[2] == ""
+
+
+def test_probe_then_test_message_run_in_order_with_two_requests(rig: Rig, golden: Golden) -> None:
+    rig.gw.scripts.append(ConnectionScript(body=b"{}"))
+    rig.gw.default_script = LIST
+    code, out, err = rig.run(["--json", "validate", "--probe", "--test-message"])
+    assert (code, err) == (0, "")
+    golden.check("output", "validate-probe-test-message-ok.json", out, schema="cli/validate")
+    assert methods(rig.gw) == ["GET", "POST"]
+
+
+@pytest.mark.parametrize(
+    ("script", "message", "outcome"),
+    [
+        (ConnectionScript(status=401), "auth_required", "failed"),
+        (ConnectionScript(status=400), "host_rejected", "failed"),
+        (ConnectionScript(status=404), "wrong_host_response", "failed"),
+        (ConnectionScript(body=b"{}"), "wrong_host_response", "outcome_unknown"),
+    ],
+    ids=["401", "400", "404", "200_object"],
+)
+def test_a_failed_send_is_a_failed_check_with_exit_12_and_a_fixed_message(
+    rig: Rig, script: ConnectionScript, message: str, outcome: str
+) -> None:
+    rig.gw.default_script = script
+    code, out, err = rig.run(["--json", "validate", "--test-message"])
+    assert code == 12 and err == ""
+    check = doc(out)["checks"][-1]
+    assert (check["name"], check["ok"]) == ("test_message", False)
+    assert "not observable" in check["message"] and "destination" in check["message"]
+    assert message not in check["message"]  # the interface: only the exit code is carried
+    assert TOKEN not in out and "ha.example" not in out and "validate:" not in check["message"]
+    assert [r["outcome"] for r in log_records(rig)] == [outcome]
+    assert log_records(rig)[0]["code"] == message
+    assert len(posts(rig.gw)) == 1
+
+
+def test_a_failed_send_golden(rig: Rig, golden: Golden) -> None:
     rig.gw.default_script = ConnectionScript(status=401)
-    code, out, _ = rig.run(["--json", "validate", "--test-message", "--probe"])
+    out = rig.run(["--json", "validate", "--test-message"])[1]
+    golden.check("output", "validate-test-message-failed.json", out, schema="cli/validate")
+
+
+def test_a_failed_check_after_a_good_probe_exits_12(rig: Rig) -> None:
+    rig.gw.scripts.append(ConnectionScript(body=b"{}"))
+    rig.gw.default_script = ConnectionScript(status=500)
+    code, out, _ = rig.run(["--json", "validate", "--probe", "--test-message"])
+    result = doc(out)
+    assert code == 12 and result["ok"] is False and result["probe"] == {"api_ok": True}
+    assert [(c["name"], c["ok"]) for c in result["checks"]][-2:] == [
+        ("probe", True),
+        ("test_message", False),
+    ]
+    assert methods(rig.gw) == ["GET", "POST"]  # a 500 without a tag is not retried: one POST
+
+
+def test_a_429_is_retried_like_a_send_and_sends_once_in_the_end(rig: Rig) -> None:
+    rig.gw.scripts.append(ConnectionScript(status=429))
+    rig.gw.default_script = LIST
+    code, _, _ = rig.run(["--json", "validate", "--test-message"])
+    assert code == 0 and methods(rig.gw) == ["POST", "POST"]
+    assert [r["outcome"] for r in log_records(rig)] == ["sent"]
+
+
+def test_an_unknown_outcome_is_never_sent_twice(rig: Rig) -> None:
+    rig.gw.default_script = ConnectionScript(
+        request_error=ConnectionResetError(), request_bytes_before_error=5
+    )
+    code, out, _ = rig.run(["--json", "validate", "--test-message"])
+    assert code == 12 and doc(out)["checks"][-1]["ok"] is False
+    assert len(rig.gw.connections) == 1
+    assert [r["outcome"] for r in log_records(rig)] == ["outcome_unknown"]
+
+
+def test_a_stalled_host_is_the_deadline_and_ends_the_process_after_the_report(
+    rig: Rig, release: threading.Event
+) -> None:
+    rig.gw.default_script = ConnectionScript(stall_after_first_byte=release)
+
+    def drive() -> None:
+        for _ in range(4000):
+            if rig.gw.connections and rig.gw.connections[0].requests:
+                break
+            release.wait(0.002)
+        rig.gw.advance(TIMEOUT_S + 0.1)
+
+    driver = threading.Thread(target=drive, daemon=True)
+    driver.start()
+    code, out, _ = rig.run(["--json", "validate", "--test-message"])
+    driver.join(10)
+    assert code == 12 and rig.exited and rig.gw.exits == [12]
+    assert doc(out)["checks"][-1]["ok"] is False
+    records = log_records(rig)
+    assert [r["outcome"] for r in records] == ["outcome_unknown"]  # logged before the exit
+
+
+def test_the_test_message_deadline_starts_with_the_check(rig: Rig) -> None:
+    class Slow(FakeGateway):
+        def read_config(self, path: str, max_bytes: int) -> bytes | None:
+            data = super().read_config(path, max_bytes)
+            if path.endswith("c.yaml"):
+                self.advance(TIMEOUT_S * 3)
+            return data
+
+    gw = Slow(home=rig.gw.home, ca=rig.gw.ca, default_script=LIST)
+    assert rig.run(["--json", "validate", "--test-message"], gateway=gw)[0] == 0
+    assert len(posts(gw)) == 1
+
+
+def test_the_test_message_deadline_is_its_own_after_a_slow_probe(rig: Rig) -> None:
+    rig.gw.scripts.append(ConnectionScript(body=b"{}", connect_delay=2.9))
+    rig.gw.default_script = ConnectionScript(body=b"[]", connect_delay=2.9)
+    code, _, _ = rig.run(["--json", "validate", "--probe", "--test-message"])
+    assert code == 0 and not rig.exited and len(posts(rig.gw)) == 1
+
+
+def test_a_test_message_is_not_sent_after_a_failed_probe_or_credential(rig: Rig) -> None:
+    rig.gw.scripts.append(ConnectionScript(status=401))
+    code, out, _ = rig.run(["--json", "validate", "--probe", "--test-message"])
     assert code == 12 and names(out) == ["config", "credential", "probe"]
-    assert [r.method for c in rig.gw.connections for r in c.requests] == ["GET"]
+    assert methods(rig.gw) == ["GET"] and log_records(rig) == []
+    code, out, _ = rig.run(["--json", "validate", "--test-message"], env={})
+    assert code == 12 and names(out) == ["config", "credential"]
+    assert methods(rig.gw) == ["GET"]
+
+
+def test_a_missing_service_is_a_failed_config_check_and_sends_nothing(rig: Rig) -> None:
+    config = rig.cfg("base_url: https://ha.example\n")
+    code, out, _ = rig.run(["--json", "validate", "--test-message"], config=config)
+    assert code == 2 and names(out) == ["config"] and rig.gw.connections == []
+
+
+def test_the_token_never_leaks_through_the_test_message_outputs(rig: Rig) -> None:
+    rig.gw.default_script = LIST
+    code, out, err = rig.run(["--verbose", "validate", "--test-message"])
+    assert code == 0 and TOKEN not in out + err
+    assert "validate: test message" not in out + err
+
+
+# --- insecure http and the test message -----------------------------------------------------
+
+
+def test_the_insecure_warning_is_printed_once_for_a_probe_and_a_test_message(rig: Rig) -> None:
+    rig.gw.scripts.append(ConnectionScript(body=b"{}"))
+    rig.gw.default_script = LIST
+    args = ["--quiet", "validate", "--probe", "--test-message"]
+    code, _, err = rig.run(args, config=rig.cfg(HTTP))
+    assert code == 0 and err.count(INSECURE_HTTP_WARNING) == 1 and len(rig.gw.connections) == 2
+
+
+def test_the_insecure_warning_is_printed_once_for_a_test_message_alone(rig: Rig) -> None:
+    rig.gw.default_script = LIST
+    err = rig.run(["--json", "validate", "--test-message"], config=rig.cfg(HTTP))[2]
+    assert err.splitlines() == [INSECURE_HTTP_WARNING]
+
+
+def test_no_insecure_warning_when_no_test_message_request_is_made(rig: Rig) -> None:
+    err = rig.run(["validate", "--test-message"], config=rig.cfg(HTTP), env={})[2]
+    assert INSECURE_HTTP_WARNING not in err and rig.gw.connections == []
 
 
 # --- signals --------------------------------------------------------------------------------
@@ -571,3 +821,87 @@ def test_one_envelope_only_when_the_report_fails(rig: Rig, monkeypatch: pytest.M
     code, out, _ = rig.run(["--json", "validate"])
     assert code == 1 and out.count("\n") == 1
     assert json.loads(out)["error"]["code"] == "internal"
+
+
+# --- test message: signals and bugs ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT, signal.SIGHUP])
+def test_a_signal_before_the_test_message_is_128_plus_n_with_no_output_and_no_log(
+    rig: Rig, signum: int
+) -> None:
+    class Sig(FakeGateway):
+        def ca_candidates(self) -> CaCandidates:  # runs in make_target, before the worker
+            self.deliver_signal(signum)
+            return super().ca_candidates()
+
+    gw = Sig(home=rig.gw.home, ca=rig.gw.ca, default_script=LIST)
+    assert rig.run(["--json", "validate", "--test-message"], gateway=gw) == (128 + signum, "", "")
+    assert gw.connections == [] and log_records(rig) == []
+
+
+def test_a_signal_during_the_send_is_decided_by_the_gate_like_the_deadline(
+    rig: Rig, release: threading.Event
+) -> None:
+    rig.gw.default_script = ConnectionScript(stall_after_first_byte=release)
+
+    def drive() -> None:
+        for _ in range(4000):
+            if rig.gw.connections and rig.gw.connections[0].requests:
+                break
+            release.wait(0.002)
+        rig.gw.deliver_signal(signal.SIGTERM)
+
+    driver = threading.Thread(target=drive, daemon=True)
+    driver.start()
+    code, out, _ = rig.run(["--json", "validate", "--test-message"])
+    driver.join(10)
+    assert code == 12 and rig.exited  # not 143: the send had started
+    assert doc(out)["checks"][-1]["ok"] is False
+    assert [r["outcome"] for r in log_records(rig)] == ["outcome_unknown"]
+
+
+def test_an_internal_failure_before_writing_is_exit_1_and_not_logged(rig: Rig) -> None:
+    rig.gw.default_script = ConnectionScript(connect_error=ValueError("x"))
+    code, out, err = rig.run(["--json", "validate", "--test-message"])
+    assert code == 1 and out.count("\n") == 1
+    body = json.loads(out)["error"]
+    assert body["code"] == "internal" and body["unknown_outcome"] is False
+    assert err.splitlines().count("internal: internal error") == 1
+    assert log_records(rig) == [] and TOKEN not in out + err
+
+
+def test_an_internal_failure_after_writing_is_exit_1_unknown_outcome_and_logged(rig: Rig) -> None:
+    rig.gw.default_script = ConnectionScript(
+        request_error=KeyError("x"), request_bytes_before_error=5
+    )
+    code, out, err = rig.run(["--json", "validate", "--test-message"])
+    assert code == 1 and out.count("\n") == 1
+    body = json.loads(out)["error"]
+    assert body["code"] == "internal" and body["unknown_outcome"] is True
+    assert err.splitlines().count("internal: internal error") == 1
+    records = log_records(rig)
+    assert [(r["outcome"], r["code"], r["exit"]) for r in records] == [
+        ("outcome_unknown", "internal", 1)
+    ]
+    assert len(rig.gw.connections) == 1
+
+
+def test_a_failing_report_after_the_send_is_one_unknown_outcome_envelope_and_a_log(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ha_notice import validate as v
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise RuntimeError("x")
+
+    rig.gw.default_script = LIST
+    monkeypatch.setattr(v, "dumps", boom)
+    code, out, _ = rig.run(["--json", "validate", "--test-message"])
+    assert code == 1 and out.count("\n") == 1
+    error = json.loads(out)["error"]
+    assert error["code"] == "internal" and error["unknown_outcome"] is True
+    assert len(posts(rig.gw)) == 1
+    assert [(r["outcome"], r["code"]) for r in log_records(rig)] == [
+        ("outcome_unknown", "internal")
+    ]
