@@ -50,7 +50,7 @@ Applied to title and message before rendering, in this order. Every pattern in t
 | Class | Characters | Action |
 |---|---|---|
 | Cc | every control character other than LF | Removed (the tab became a space in step 2). |
-| Cs, Co | surrogates, private use | Private use is removed. A lone surrogate never reaches this step (step 1 refuses it); a valid pair is one astral character and not a Cs. The standalone title sanitizer function still removes a surrogate (defence in depth), so the `level_prefix` "must come out unchanged" rule refuses a prefix that contains one. |
+| Cs, Co | surrogates, private use | Private use is removed. A lone surrogate never reaches this step (step 1 refuses it); a valid pair is one astral character and not a Cs. The title rule applied to a `level_prefix` removes a surrogate (defence in depth; the prefix check does not use step 1's refusal), so the "must come out unchanged" check fails and the config is `config_invalid`. |
 | Cn | unassigned code points and noncharacters, including U+FDD0 to U+FDEF and U+FFFE and U+FFFF of every plane | Removed. Membership follows the running Python's Unicode tables; the golden test pins a fixed list of code points. |
 | Zl, Zp | U+2028, U+2029 | Became LF in step 2. |
 | Listed Cf and default-ignorable | U+00AD, U+061C, U+180E, U+200B, U+200E, U+200F, U+202A to U+202E, U+2060 to U+206F, U+FEFF, U+FFF9 to U+FFFB, U+E0000 to U+E007F, U+E0100 to U+E01EF; the fillers U+115F, U+1160, U+3164 and U+FFA0; U+2800; the Mongolian selectors U+180B to U+180D and U+180F | Removed. |
@@ -253,7 +253,7 @@ Schema: [schemas/config.json](../schemas/config.json); example: [config.example.
 | `allow_insecure_http` | `false` | Allow an `http://` base URL (the token then travels in cleartext). |
 | `ca_file` | unset | Extra CA bundle, an absolute path; the way to trust a self-signed server. There is no key that turns verification off. |
 | `link_hosts` | unset | List of 1 to 32 host names in lowercase, each of at least two labels `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?` joined by single dots, no leading or trailing dot, at most 253 characters; an entry that does not match is `config_invalid` (`details.key: link_hosts`). See the link rule. |
-| `level_prefix` | `{info: "", warn: "WARN:", action: "ACTION:", error: "ERROR:"}` | Title prefixes, at most 16 characters each; run through the title rule (sanitizer steps 1 to 5) and must come out unchanged, else `config_invalid`. |
+| `level_prefix` | `{info: "", warn: "WARN:", action: "ACTION:", error: "ERROR:"}` | Title prefixes, at most 16 characters each; run through the title rule (sanitizer steps 1 to 5, except that a surrogate is removed rather than refused, see the Cs, Co row) and must come out unchanged, else `config_invalid`. |
 | `default_group` | unset | `data.group` for every notification; `[A-Za-z0-9_-]{1,64}` as a whole. |
 | `max_chars` | `1000` | Message limit in code points, 100 to 2000. |
 | `timeout` | `10s` | The one deadline of a `send` ([Deadline](#home-assistant-edge)), 1s to 120s. |
