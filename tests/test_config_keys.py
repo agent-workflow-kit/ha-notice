@@ -497,3 +497,20 @@ def test_known_key_types_still_win_over_grammar(gw: FakeGateway, home: Path) -> 
 def test_values_stay_as_written_for_the_other_owners(gw: FakeGateway, home: Path) -> None:
     cfg = loads(gw, home, "timeout: 2s\nmax_chars: 300\n")
     assert cfg.values == {"timeout": "2s", "max_chars": 300}
+
+
+def test_a_bad_member_in_a_drop_in_is_refused_even_when_the_main_file_is_fine(
+    gw: FakeGateway, home: Path
+) -> None:
+    write(home, "level_prefix: {info: 'I:'}\n")
+    d = home / ".config" / "ha-notice" / "config.d"
+    d.mkdir()
+    (d / "a.yaml").write_text('level_prefix: {warn: "A\\nB"}\n', encoding="utf-8")
+    assert fails(gw).key == "level_prefix"
+
+
+def test_repeated_loads_give_the_same_result(gw: FakeGateway, home: Path) -> None:
+    write(home, "timeout: 1m\nmax_chars: 300\ndefault_group: g\nlevel_prefix: {warn: '!'}\n")
+    first, second = config.load(gw, None), config.load(gw, None)
+    assert first.values == second.values
+    assert (first.timeout, first.max_chars, first.default_group) == (60.0, 300, "g")
