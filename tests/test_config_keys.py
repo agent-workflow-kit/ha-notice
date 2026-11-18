@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -568,3 +569,67 @@ def test_repeated_loads_give_the_same_result(gw: FakeGateway, home: Path) -> Non
     first, second = config.load(gw, None), config.load(gw, None)
     assert first.values == second.values
     assert (first.timeout, first.max_chars, first.default_group) == (60.0, 300, "g")
+
+
+# --- level_prefix is the sanitizer's title rule (issue #16) ----------------------------------
+
+
+# Independent oracle written from docs/interface.md (the level_prefix rule, sanitizer steps 1 to 5
+# and the Cs/Co row). It calls nothing from ha_notice.payload.
+_LISTED_REMOVED = {
+    0xAD, 0x61C, 0x180E, 0x200B, 0x200E, 0x200F, 0xFEFF, 0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800,
+    0x180B, 0x180C, 0x180D, 0x180F,
+}  # fmt: skip
+for _lo, _hi in [
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0xFFF9, 0xFFFB),
+    (0xE0000, 0xE007F),
+    (0xE0100, 0xE01EF),
+]:
+    _LISTED_REMOVED.update(range(_lo, _hi + 1))
+
+
+def _removed(ch: str) -> bool:
+    if ch == "\n":
+        return False
+    return ord(ch) in _LISTED_REMOVED or unicodedata.category(ch) in ("Cc", "Cs", "Co", "Cn")
+
+
+def _golden_prefix(value: str) -> bool:
+    if len(value) > 16 or any(0xD800 <= ord(c) <= 0xDFFF for c in value):
+        return False
+    if value == "":
+        return True
+    t = value.replace("\r\n", "\n")
+    for sep in ("\r", "\x85", "\u2028", "\u2029"):
+        t = t.replace(sep, "\n")
+    t = t.replace("\t", " ")
+    t = "".join(c for c in t if not _removed(c))
+    t = "\n".join(line.rstrip() for line in t.split("\n"))
+    while "\n\n\n" in t:
+        t = t.replace("\n\n\n", "\n\n")
+    t = t.strip().replace("\n", " ")
+    while "  " in t:
+        t = t.replace("  ", " ")
+    if t.strip() != value:
+        return False
+    # An empty title: only whitespace and marks.
+    return not all(c.isspace() or unicodedata.category(c) in ("Mn", "Mc", "Me") for c in value)
+
+
+def test_prefix_ok_equals_the_sanitizer_over_every_code_point() -> None:
+    # Alone, and between two letters (so a mark, a space or a joiner has a neighbour).
+    for n in range(0x110000):
+        ch = chr(n)
+        for value in (ch, "a" + ch + "b"):
+            assert config.prefix_ok(value) == _golden_prefix(value), hex(n)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "a", "a" * 16, "a" * 17, " a", "a ", "a  b", "a\tb", "a\nb", "\u0301", "a\u0301", "\ud800"]
+    + ["😀", "\U0001f600" * 16, "\U0001f600" * 17, "WARN:", "é" * 16],
+)
+def test_prefix_ok_golden_on_a_table(value: str) -> None:
+    assert config.prefix_ok(value) == _golden_prefix(value)

@@ -20,10 +20,10 @@ Rules kept here (docs/interface.md, Config):
   durations (``(0|[1-9][0-9]*)(\\.[0-9]+)?(ms|s|m)?`` of at most 64 characters, or a finite number
   of seconds, compared exactly in ``Fraction``s, so ``1e3``, ``1:30``, ``.nan`` and a bool are
   refused), ``level_prefix`` members (at most 16 characters that the sanitizer's title rule leaves
-  unchanged), ``default_group`` and
-  ``max_chars``. Every pattern is a full match (``re.fullmatch``, never ``$``). The error names the
-  key and never the value. ``base_url``, ``service``, ``token_env`` and ``ca_file`` follow (issue
-  #10, below); TODO(#16): ``link_hosts``.
+  unchanged, judged by ``payload.sanitize_title`` itself), ``link_hosts`` (1 to 32 lowercase host
+  names of at least two labels), ``default_group`` and ``max_chars``. Every pattern is a full
+  match (``re.fullmatch``, never ``$``). The error names the key and never the value.
+  ``base_url``, ``service``, ``token_env`` and ``ca_file`` follow (issue #10, below).
 - The token is never read by ``load``; ``Config.read_token`` reads it from the injected
   environment mapping, from the variable ``token_env`` names and no other.
 """
@@ -34,7 +34,6 @@ import ipaddress
 import math
 import os.path
 import re
-import unicodedata
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from fractions import Fraction
@@ -44,6 +43,7 @@ import yaml
 
 from ha_notice.gateway import Gateway, HomeLookupError, SourceError
 from ha_notice.output import ErrorResult, build_error, safe_key
+from ha_notice.payload import has_lone_surrogate, is_empty_text, sanitize_title
 
 __all__ = [
     "DEFAULTS",
@@ -157,6 +157,13 @@ class Config:
     @property
     def default_group(self) -> str | None:
         return self.values.get("default_group")
+
+    @property
+    def link_hosts(self) -> tuple[str, ...] | None:
+        """The allowed link hosts, or ``None`` when unset (no restriction). Match with
+        ``link.link_host_allowed``; ``validate_notification`` takes this as ``link_hosts``."""
+        hosts = self.values.get("link_hosts")
+        return None if hosts is None else tuple(hosts)
 
     @property
     def level_prefix(self) -> dict[str, str]:
@@ -324,19 +331,11 @@ DURATION_MAX_CHARS = 64
 DURATION_RE = re.compile(r"((?:0|[1-9][0-9]*)(?:\.[0-9]+)?)(ms|s|m)?")
 GROUP_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _UNIT = {None: Fraction(1), "s": Fraction(1), "ms": Fraction(1, 1000), "m": Fraction(60)}
-# Sanitizer table (docs/interface.md): the listed Cf and default-ignorable characters it removes.
-_REMOVED = frozenset(
-    [0x00AD, 0x061C, 0x180E, 0x200B, 0x200E, 0x200F, 0xFEFF, 0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800]
-    + list(range(0x202A, 0x202F))
-    + list(range(0x2060, 0x2070))
-    + list(range(0xFFF9, 0xFFFC))
-    + list(range(0xE0000, 0xE0080))
-    + list(range(0xE0100, 0xE01F0))
-    + list(range(0x180B, 0x180E))
-    + [0x180F]
-)
-_REMOVED_CATEGORIES = frozenset({"Cc", "Cs", "Co", "Cn", "Zl", "Zp"})
-_EMPTY_CATEGORIES = frozenset({"Mn", "Mc", "Me"})
+LINK_HOSTS_MAX = 32
+LINK_HOST_MAX_CHARS = 253
+_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+# At least two lowercase ASCII labels; the length is capped before the pattern runs.
+LINK_HOST_RE = re.compile(rf"(?:{_LABEL}\.)+{_LABEL}")
 
 
 def _seconds(value: object) -> Fraction | None:
@@ -372,19 +371,17 @@ def group_ok(value: str) -> bool:
 
 
 def prefix_ok(value: str) -> bool:
-    """A ``level_prefix`` member: at most 16 code points that the title rule (sanitizer steps 1 to
-    5) leaves unchanged, and that are not an empty title. The sanitizer itself is #13's; this is
-    its title rule restated for a prefix. TODO(#13): call the sanitizer instead, once it exists."""
-    if len(value) > PREFIX_MAX:
+    """A ``level_prefix`` member: at most 16 code points that the sanitizer's title rule (steps 1
+    to 5, except that a surrogate is removed rather than refused) leaves unchanged, and that are
+    not an empty title (only marks and whitespace). The empty string is the ``info`` default."""
+    if len(value) > PREFIX_MAX or has_lone_surrogate(value):
         return False
-    for ch in value:
-        if ord(ch) in _REMOVED or unicodedata.category(ch) in _REMOVED_CATEGORIES:
-            return False
-    if value != value.strip() or "  " in value:
-        return False
-    return not value or any(
-        not ch.isspace() and unicodedata.category(ch) not in _EMPTY_CATEGORIES for ch in value
-    )
+    return sanitize_title(value) == value and (value == "" or not is_empty_text(value))
+
+
+def link_host_entry_ok(value: str) -> bool:
+    """A ``link_hosts`` entry: lowercase, at least two labels, at most 253 characters."""
+    return len(value) <= LINK_HOST_MAX_CHARS and LINK_HOST_RE.fullmatch(value) is not None
 
 
 def _grammar_ok(key: str, value: Any) -> bool:
@@ -404,7 +401,9 @@ def _grammar_ok(key: str, value: Any) -> bool:
         return token_env_ok(value)
     if key == "ca_file":
         return ca_file_ok(value)
-    return True  # TODO(#16): link_hosts
+    if key == "link_hosts":
+        return 1 <= len(value) <= LINK_HOSTS_MAX and all(link_host_entry_ok(v) for v in value)
+    return True
 
 
 # --- base_url, service, token_env, ca_file (issue #10) ----------------------------------------

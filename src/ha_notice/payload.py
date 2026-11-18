@@ -23,8 +23,8 @@ The sanitizer (issue #13, docs/interface.md, Sanitizer) runs inside ``validate_n
 ``Notification.title`` and ``Notification.message`` hold the sanitized text. TODO(#17): the title
 and message cut, the prefix and the budget (rendering).
 The command-keyword check (issue #14) runs last inside ``validate_notification``, on the sanitized
-message. The link rule (issue #15) is in ``link.py`` and runs before the message checks. TODO(#16):
-``link_hosts``.
+message. The link rule (issue #15) is in ``link.py`` and runs before the message checks, followed
+by the ``link_hosts`` check (issue #16); the send flow passes ``Config.link_hosts`` (TODO(#27)).
 """
 
 from __future__ import annotations
@@ -33,12 +33,12 @@ import json
 import math
 import re
 import unicodedata
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from ha_notice.gateway import Gateway, SourceError
-from ha_notice.link import link_reason
+from ha_notice.link import link_host_allowed, link_reason
 from ha_notice.output import ErrorResult, build_error, safe_pointer
 
 INPUT_MAX = 1048576  # bytes read from one source (1 MiB)
@@ -182,7 +182,7 @@ def _check_text(name: str, value: Any) -> str:
     return value
 
 
-def validate_notification(obj: object) -> Notification:
+def validate_notification(obj: object, link_hosts: Sequence[str] | None = None) -> Notification:
     """Validate a parsed notification (a dict from JSON, or the dict of the flags that were given).
 
     Checked in a fixed order, so that the refusal does not depend on the order of the keys: a
@@ -191,6 +191,10 @@ def validate_notification(obj: object) -> Notification:
     lone surrogate, level outside the vocabulary), and last a message that is absent or empty after
     sanitizing (``empty_message``) or a command message (``command_keyword``).
     ``null`` is a wrong type, never an absent field.
+
+    ``link_hosts`` is the validated config list (``None`` = unset, no restriction). When set, the
+    link's host must match it, else ``PayloadError("link_invalid", "link")`` (pointer ``/link``);
+    an empty list allows no host. TODO(#27): the send flow passes ``Config.link_hosts``.
     """
     if not isinstance(obj, Mapping):
         raise PayloadError("invalid_payload", None)
@@ -221,7 +225,8 @@ def validate_notification(obj: object) -> Notification:
         reason = link_reason(link)
         if reason is not None:
             raise PayloadError(reason)  # no details (docs/interface.md, details by reason)
-        # TODO(#16): link_hosts; its refusal is PayloadError("link_invalid", "link") (/link).
+        if link_hosts is not None and not link_host_allowed(link, link_hosts):
+            raise PayloadError("link_invalid", "link")  # the one link refusal with details
     if message is None or is_empty_text(message):
         raise PayloadError("empty_message")
     # Order: link failures, then empty_message, then command_keyword (docs/interface.md).
