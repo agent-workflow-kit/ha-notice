@@ -324,7 +324,10 @@ def test_every_valid_sample_passes_the_field_checks(name: str) -> None:
         assert (name, err.reason) == ("empty_message_is_the_tools_check", "empty_message")
 
 
-@pytest.mark.parametrize("name", [n for n in SAMPLES["invalid"] if n not in _LINK_RULES])
+@pytest.mark.parametrize(
+    "name",
+    [n for n in SAMPLES["invalid"] if n not in _LINK_RULES and not n.startswith("actions_")],
+)
 def test_every_invalid_sample_is_refused_like_the_schema_says(name: str) -> None:
     sample = SAMPLES["invalid"][name]
     assert schema_errors("notification", sample["instance"]) != []

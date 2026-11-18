@@ -1,0 +1,1 @@
+{"title":"ACTION: Deploy","message":"Deploy finished","data":{"group":"ops","actions":[{"action":"URI","title":"Open dashboard","uri":"https://ha.example/lovelace/0?x=1#y"},{"action":"URI","title":"Logs é😀","uri":"http://logs.example:8080/run/1"}]}}

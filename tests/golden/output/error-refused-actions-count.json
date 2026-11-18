@@ -1,0 +1,1 @@
+{"error":{"code":"refused","message":"the notification is not valid","reason":"invalid_payload","details":{"pointer":"/actions"},"retryable":null,"retry_after_s":null,"unknown_outcome":null}}

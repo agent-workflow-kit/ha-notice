@@ -48,7 +48,10 @@ DEPTH_MAX = 100  # nesting of arrays and objects accepted by hardened_loads
 TEXT_MAX = 100000  # characters of input for title and message
 LEVELS = ("info", "warn", "action", "error")  # ordered: info < warn < action < error
 DEFAULT_LEVEL = "info"
-FIELDS = ("title", "message", "level", "link")  # the order in which known fields are checked
+FIELDS = ("title", "message", "level", "link", "actions")  # the order in which fields are checked
+ACTIONS_MAX = 3  # the companion apps show up to three actions
+ACTION_TITLE_MAX = 64  # characters, after sanitizing; longer is refused, never cut
+ACTION_KEYS = ("title", "uri")
 
 
 _NO_POINTER = frozenset({"empty_message", "command_keyword", "link_scheme"})
@@ -62,16 +65,21 @@ class PayloadError(Exception):
     turned into a pointer through ``safe_pointer``. Neither is built from an input value except
     the field name, which is never printed raw."""
 
-    def __init__(self, reason: str, field: str | None = None) -> None:
+    def __init__(
+        self, reason: str, field: str | None = None, *, pointer: str | None = None
+    ) -> None:
         super().__init__(reason)
         self.reason = reason
         self.field = field
+        self._pointer = pointer  # a built pointer of an action (``/actions/<i>/<name>``)
 
     @property
     def pointer(self) -> str | None:
         """``details.pointer``; ``None`` for ``empty_message``, ``command_keyword``,
         ``link_scheme`` and a ``link_invalid`` without a field (a link rule failure; only the
         ``link_hosts`` refusal, which names the field ``link``, has the pointer ``/link``)."""
+        if self._pointer is not None:
+            return self._pointer
         if self.reason in _NO_POINTER or (self.reason == "link_invalid" and self.field is None):
             return None
         return safe_pointer(self.field)
@@ -163,15 +171,26 @@ def check_command_keyword(message: str) -> bool:
 
 
 @dataclass(frozen=True)
+class Action:
+    """One URI action: ``title`` is sanitized (one line, 1 to 64 characters), ``uri`` passed the
+    link rule and ``link_hosts`` and is kept as given (the scheme is lowercased on rendering)."""
+
+    title: str
+    uri: str
+
+
+@dataclass(frozen=True)
 class Notification:
     """A notification whose fields passed the checks of this module. ``title`` and ``message`` are
     sanitized; ``title`` is ``None`` when absent or empty after sanitizing and ``link`` is
-    ``None`` when absent; ``message`` is never empty (that is ``empty_message``)."""
+    ``None`` when absent; ``message`` is never empty (that is ``empty_message``). ``actions`` are
+    the validated URI actions in input order (empty when absent)."""
 
     message: str
     level: str = DEFAULT_LEVEL
     title: str | None = None
     link: str | None = None
+    actions: tuple[Action, ...] = ()
 
 
 def _check_text(name: str, value: Any) -> str:
@@ -182,12 +201,57 @@ def _check_text(name: str, value: Any) -> str:
     return value
 
 
+def _action_pointer(index: int, name: str | None = None) -> str:
+    base = f"/actions/{index}"
+    return base if name is None else base + safe_pointer(name)
+
+
+def _validate_action(index: int, item: object, link_hosts: Sequence[str] | None) -> Action:
+    """One action: an object with exactly the keys ``title`` and ``uri`` (unknown keys: the
+    smallest name; both required). Every refusal is ``invalid_payload`` with pointer
+    ``/actions/<i>`` or ``/actions/<i>/<name>``, except a uri refused by the link rule or by
+    ``link_hosts``, which keeps its reason (``link_invalid``, ``link_scheme``) with the pointer
+    ``/actions/<i>/uri``."""
+    if not isinstance(item, Mapping):
+        raise PayloadError("invalid_payload", pointer=_action_pointer(index))
+    unknown = [k for k in item if k not in ACTION_KEYS]
+    if unknown:
+        names = [k for k in unknown if isinstance(k, str)]
+        key = min(names) if len(names) == len(unknown) else "?"
+        raise PayloadError("invalid_payload", pointer=_action_pointer(index, key))
+    bad_title = PayloadError("invalid_payload", pointer=_action_pointer(index, "title"))
+    title = item.get("title")
+    if type(title) is not str or len(title) > TEXT_MAX or has_lone_surrogate(title):
+        raise bad_title
+    title = sanitize_title(title)
+    if is_empty_text(title) or len(title) > ACTION_TITLE_MAX:
+        raise bad_title
+    uri_pointer = _action_pointer(index, "uri")
+    uri = item.get("uri")
+    if type(uri) is not str:
+        raise PayloadError("invalid_payload", pointer=uri_pointer)
+    reason = link_reason(uri)
+    if reason is None and link_hosts is not None and not link_host_allowed(uri, link_hosts):
+        reason = "link_invalid"
+    if reason is not None:
+        raise PayloadError(reason, pointer=uri_pointer)
+    return Action(title=title, uri=uri)
+
+
+def _validate_actions(value: object, link_hosts: Sequence[str] | None) -> tuple[Action, ...]:
+    """``actions``: a list of at most three objects. The count is checked before any item, so a
+    huge list costs nothing."""
+    if type(value) is not list or len(value) > ACTIONS_MAX:
+        raise PayloadError("invalid_payload", "actions")
+    return tuple(_validate_action(i, item, link_hosts) for i, item in enumerate(value))
+
+
 def validate_notification(obj: object, link_hosts: Sequence[str] | None = None) -> Notification:
     """Validate a parsed notification (a dict from JSON, or the dict of the flags that were given).
 
     Checked in a fixed order, so that the refusal does not depend on the order of the keys: a
     value that is not an object (pointer ``""``), then unknown fields (the smallest name), then the
-    known fields in the order title, message, level, link (wrong type, over 100000 characters, a
+    known fields in the order title, message, level, link, actions (wrong type, over 100000 characters, a
     lone surrogate, level outside the vocabulary), and last a message that is absent or empty after
     sanitizing (``empty_message``) or a command message (``command_keyword``).
     ``null`` is a wrong type, never an absent field.
@@ -227,12 +291,13 @@ def validate_notification(obj: object, link_hosts: Sequence[str] | None = None) 
             raise PayloadError(reason)  # no details (docs/interface.md, details by reason)
         if link_hosts is not None and not link_host_allowed(link, link_hosts):
             raise PayloadError("link_invalid", "link")  # the one link refusal with details
+    actions = _validate_actions(obj["actions"], link_hosts) if "actions" in obj else ()
     if message is None or is_empty_text(message):
         raise PayloadError("empty_message")
     # Order: link failures, then empty_message, then command_keyword (docs/interface.md).
     if check_command_keyword(message):
         raise PayloadError("command_keyword")
-    return Notification(message=message, level=level, title=title, link=link)
+    return Notification(message=message, level=level, title=title, link=link, actions=actions)
 
 
 def notification_from_flags(

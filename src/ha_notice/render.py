@@ -6,8 +6,9 @@ clock. ``render`` returns the body for the notify service and whether anything w
 
 The title is cut at 256 characters (255 plus an ellipsis), then the level prefix is joined on. The
 message is cut to ``max_chars`` code points and 2000 UTF-8 bytes, marker included. ``data`` is
-built only from ``url``, ``clickAction``, ``tag`` and ``group``, in that order; no caller text
-other than the link and the (already hashed) tag reaches it. The command-keyword rule ran on the
+built only from ``url``, ``clickAction``, ``tag``, ``group`` and ``actions``, in that order; no
+caller text other than the link, the validated actions (sanitized titles, allowlisted URIs, never
+cut) and the (already hashed) tag reaches it. The command-keyword rule ran on the
 full sanitized message in ``validate_notification`` and is not repeated here: a cut message ends
 in the marker and so can never be a keyword.
 
@@ -174,7 +175,7 @@ def render(
         body["title"] = line
     body["message"] = message
 
-    data: dict[str, str] = {}
+    data: dict[str, Any] = {}
     if notification.link is not None:
         url = _link(notification.link)
         data["url"] = url
@@ -183,6 +184,10 @@ def render(
         data["tag"] = tag
     if default_group is not None:
         data["group"] = default_group
+    if notification.actions:
+        data["actions"] = [
+            {"action": "URI", "title": a.title, "uri": _link(a.uri)} for a in notification.actions
+        ]
     if data:
         body["data"] = data
     return Rendered(body=body, truncated=title_cut or message_cut)

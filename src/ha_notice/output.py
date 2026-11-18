@@ -119,7 +119,10 @@ OVERRIDE_MESSAGES = frozenset(
     }
 )
 _FIELD_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
-_POINTER_RE = re.compile(r"(?:|/(?:[A-Za-z0-9_-]{1,64}|\?))")
+_POINTER_RE = re.compile(
+    r"(?:|/(?:[A-Za-z0-9_-]{1,64}|\?)|/actions/[0-2](?:/(?:[A-Za-z0-9_-]{1,64}|\?))?)"
+)
+_URI_POINTER_RE = re.compile(r"/actions/[0-2]/uri")
 
 # Details allowed per code: (required, optional), in the order of docs/interface.md.
 _DETAILS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
@@ -187,7 +190,7 @@ def _check_details(code: str, reason: str | None, given: dict[str, Any]) -> dict
         if reason == "invalid_payload":
             required = ("pointer",)
             allowed = {"pointer"}
-        elif reason == "link_invalid":
+        elif reason in ("link_invalid", "link_scheme"):
             allowed = {"pointer"}
     if code == "unavailable":
         if given.get("phase", "input") != "input":
@@ -207,7 +210,12 @@ def _check_details(code: str, reason: str | None, given: dict[str, Any]) -> dict
                 given[name] = "?"
         elif name == "pointer":
             ok = isinstance(value, str) and _POINTER_RE.fullmatch(value)
-            if not ok or (reason == "link_invalid" and value != "/link"):
+            link_ok = value == "/link" and reason == "link_invalid"
+            if not ok or (
+                reason in ("link_invalid", "link_scheme")
+                and not link_ok
+                and _URI_POINTER_RE.fullmatch(value) is None
+            ):
                 raise ValueError("pointer does not match the schema")
         elif name == "env":
             if not _clean_line(value, 256):
