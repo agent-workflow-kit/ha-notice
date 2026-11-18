@@ -266,7 +266,7 @@ def test_a_response_is_returned_at_once() -> None:
     verdict, took = run(gateway, lambda before_write: (before_write(), resp())[1])
     assert verdict.kind is Kind.COMPLETED and verdict.result == Success(200)
     assert verdict.facts is not None and verdict.facts.requests == 1
-    assert took < LOAD_SLACK_S
+    assert took < 0.5  # lower than the 1 s deadline: kept tight on purpose
     assert not verdict.worker_may_run
 
 
