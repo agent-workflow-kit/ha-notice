@@ -271,6 +271,8 @@ class FakeGateway:
     def read_source(
         self, source: int | str, max_bytes: int, remaining: Callable[[], float]
     ) -> SourceResult:
+        if isinstance(source, str) and (source == "" or source not in self.sources):
+            raise SourceError  # like the real gateway: a missing path or "" cannot be opened
         scripted = self.sources.get(source, b"")
         if isinstance(scripted, SourceError):
             raise scripted

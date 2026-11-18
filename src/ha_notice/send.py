@@ -102,8 +102,10 @@ def run_send(inv: Invocation) -> int:
         return max(0.0, deadline - gateway.monotonic())
 
     try:
-        if args.stdin_json or args.file is not None:
-            source: int | str = 0 if args.stdin_json or args.file == "-" else str(args.file)
+        if args.message is None:
+            # --stdin-json, --file, or the default (stdin is not a terminal; step 1 checked).
+            path = args.file is not None and args.file != "-" and not args.stdin_json
+            source: int | str = str(args.file) if path else 0
             notification = read_notification(gateway, source, remaining, config.link_hosts)
         else:
             notification = notification_from_flags(

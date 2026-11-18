@@ -39,11 +39,22 @@ class SpyGateway(FakeGateway):
     """Records which sources were read."""
 
     reads: list[int | str] = field(default_factory=list)
+    state_calls: list[str] = field(default_factory=list)
+    input_seconds: float = 0.0  # fake clock time one input read takes
+
+    def open_state_dir(self, home: str) -> int:
+        self.state_calls.append("open_state_dir")
+        return super().open_state_dir(home)
+
+    def open_state_file(self, dir_fd: int, name: str, *, append: bool = False) -> int:
+        self.state_calls.append("open_state_file")
+        return super().open_state_file(dir_fd, name, append=append)
 
     def read_source(
         self, source: int | str, max_bytes: int, remaining: Callable[[], float]
     ) -> SourceResult:
         self.reads.append(source)
+        self.advance(self.input_seconds)
         return super().read_source(source, max_bytes, remaining)
 
 
@@ -181,13 +192,14 @@ def test_dedupe_key_is_echoed_and_never_hashed_elsewhere(run: Any, conf: Any) ->
 
 def test_dry_run_needs_no_destination_and_no_token(run: Any, conf: Any) -> None:
     gw = SpyGateway(state_error=StateDirError())
-    code, _, _ = run(
+    code, _, err = run(
         ["--json", "--config", conf("enabled: true\n"), "send", "--dry-run", "--message=a"],
         gw,
         NoEnv(),
     )
-    assert code == 0
+    assert code == 0 and err == ""
     assert gw.resolve_calls == [] and gw.connections == [] and gw.reads == []
+    assert gw.state_calls == []  # no state directory, so no log
 
 
 def test_dry_run_with_service_missing_exits_0(run: Any, conf: Any) -> None:
@@ -353,6 +365,15 @@ def test_stalled_input_is_unavailable(run: Any, conf: Any) -> None:
 
 
 @pytest.mark.parametrize("source", ["--file=/nonexistent/n.json", "--file="])
+def test_unscripted_file_is_usage_like_the_real_gateway(run: Any, conf: Any, source: str) -> None:
+    code, out, err = run(
+        ["--json", "--config", conf("enabled: true\n"), "send", "--dry-run", source]
+    )
+    assert code == 2 and _error(out)["code"] == "usage"
+    assert "nonexistent" not in out + err
+
+
+@pytest.mark.parametrize("source", ["--file=/nonexistent/n.json", "--file="])
 def test_bad_file_is_usage(run: Any, conf: Any, source: str) -> None:
     gw = SpyGateway(sources={"/nonexistent/n.json": SourceError(), "": SourceError()})
     code, out, err = run(
@@ -360,6 +381,74 @@ def test_bad_file_is_usage(run: Any, conf: Any, source: str) -> None:
     )
     assert code == 2 and _error(out)["code"] == "usage"
     assert "nonexistent" not in out + err
+
+
+# --- the default source, the clock, warnings and links ------------------------------------
+
+
+def _dry(cfg: str, *extra: str) -> list[str]:
+    return ["--json", "--config", cfg, "send", "--dry-run", *extra]
+
+
+def test_default_stdin_is_read_when_no_source_flag(run: Any, conf: Any) -> None:
+    gw = SpyGateway(sources={0: b'{"message":"piped","title":"T"}'})
+    code, out, _ = run(_dry(conf("enabled: true\n")), gw)
+    doc = json.loads(out)
+    assert code == 0 and gw.reads == [0]
+    assert doc["rendered"]["message"] == "piped" and doc["rendered"]["title"] == "T"
+
+
+def test_default_stdin_garbage_is_invalid_payload_not_empty_message(run: Any, conf: Any) -> None:
+    gw = SpyGateway(sources={0: b"garbage"})
+    code, out, _ = run(_dry(conf("enabled: true\n")), gw)
+    body = _error(out)
+    assert code == 20 and body["reason"] == "invalid_payload"
+    assert body["details"] == {"pointer": ""}
+
+
+@pytest.mark.parametrize("scripted", [b"", SourceError()], ids=["devnull", "closed"])
+def test_default_stdin_empty_or_unreadable_is_invalid_payload(
+    run: Any, conf: Any, scripted: Any
+) -> None:
+    gw = SpyGateway(sources={0: scripted})
+    code, out, _ = run(_dry(conf("enabled: true\n")), gw)
+    body = _error(out)
+    assert code == 20 and body["reason"] == "invalid_payload" and gw.reads == [0]
+
+
+def test_default_stdin_stalled_is_unavailable(run: Any, conf: Any) -> None:
+    gw = SpyGateway(sources={0: StallingSource(b'{"mess')})
+    code, out, _ = run(_dry(conf("timeout: 2s\n")), gw)
+    body = _error(out)
+    assert code == 12 and body["code"] == "unavailable" and body["details"] == {"phase": "input"}
+
+
+def test_message_flag_wins_over_piped_stdin(run: Any, conf: Any) -> None:
+    gw = SpyGateway(sources={0: b'{"message":"from stdin"}'})
+    code, out, _ = run(_dry(conf("enabled: true\n"), "--message=from flag"), gw)
+    assert code == 0 and gw.reads == []
+    assert json.loads(out)["rendered"]["message"] == "from flag"
+
+
+def test_input_time_is_in_duration_and_verbose(run: Any, conf: Any) -> None:
+    gw = SpyGateway(sources={0: b'{"message":"a"}'}, input_seconds=1.5)
+    code, out, err = run(["--verbose", *_dry(conf("enabled: true\n"))], gw)
+    assert code == 0 and json.loads(out)["duration_ms"] == 1500
+    assert err.splitlines() == ["input: 1500 ms", "render: 0 ms"]
+
+
+def test_dry_run_has_no_insecure_http_warning(run: Any, conf: Any) -> None:
+    cfg = conf("base_url: http://ha.example\nallow_insecure_http: true\n")
+    code, out, err = run(_dry(cfg, "--message=a"))
+    assert code == 0 and json.loads(out)["warnings"] == [] and err == ""
+
+
+def test_flags_link_outside_link_hosts_is_link_invalid(run: Any, conf: Any) -> None:
+    cfg = conf("link_hosts: [ha.example]\n")
+    code, out, _ = run(_dry(cfg, "--message=a", "--link=https://evil.example/"))
+    body = _error(out)
+    assert code == 20 and body["reason"] == "link_invalid"
+    assert body["details"] == {"pointer": "/link"}
 
 
 # --- progress and safety ------------------------------------------------------------------
@@ -407,6 +496,7 @@ def test_real_process_dry_run_reads_no_home_and_no_token(tmp_path: Path) -> None
         "XDG_CONFIG_HOME": str(home / "cfg"),
         "XDG_STATE_HOME": str(home / "state"),
         "LC_ALL": "C",
+        "HA_TOKEN": "sentinel-token-value",
     }
     proc = subprocess.run(
         [sys.executable, "-m", "ha_notice", "--json", "--config", str(cfg), "send", "--dry-run"]
@@ -418,5 +508,6 @@ def test_real_process_dry_run_reads_no_home_and_no_token(tmp_path: Path) -> None
         stdin=subprocess.DEVNULL,
     )
     assert proc.returncode == 0 and proc.stderr == b""
+    assert b"sentinel-token-value" not in proc.stdout + proc.stderr
     assert schema_errors("cli/send", json.loads(proc.stdout)) == []
     assert list(home.iterdir()) == []
