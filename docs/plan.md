@@ -25,7 +25,7 @@ Implements [interface.md](interface.md) and [design.md](design.md). The issues f
 | `config.py` | 1 | Config from the password-database home, drop-ins, strict YAML, no environment overrides. |
 | `state.py` | 2 | Safe state directory and file opens; one fixed warning. |
 | `log.py` | 2 | Log records and rotation. |
-| `hass.py` | 3, 4 | URL building, request, deadline, probe call. |
+| `hass.py` | 3, 4 | URL building, request building, one attempt, the probe call. |
 | `retry.py` | 3 | Retry loop (429, connect-phase), waits. |
 | `response.py` | 3 | Pure mapping of an answer or an exception (with the gate state) to a success or an error spec. |
 

@@ -16,10 +16,11 @@ from collections.abc import Callable
 
 import pytest
 
+from ha_notice import retry as retry_module
 from ha_notice.config import parse_base_url
 from ha_notice.gateway import RealGateway
 from ha_notice.hass import RawResponse, Target, send_once
-from ha_notice.response import ErrorSpec, Gate, Op, Success
+from ha_notice.response import ErrorSpec, Gate, Op, Retry, Success
 from ha_notice.retry import (
     CONNECTION_WAIT_S,
     RATE_LIMIT_WAITS_S,
@@ -386,6 +387,63 @@ def test_an_abandoned_gate_after_a_wait_makes_no_further_request() -> None:
     assert outcome.retry_after_s == 2
 
 
+def test_an_abandoned_gate_before_a_wait_neither_sleeps_nor_requests_again() -> None:
+    class AbandonedAtOnce(LocalGate):
+        def abandoned(self) -> bool:
+            return True
+
+    outcome, script, gateway = run(resp(429), resp(), gate=AbandonedAtOnce())
+    assert (script.requests, gateway.sleeps, code(outcome)) == (1, [], "rate_limited")
+    assert (outcome.retry_after_s, outcome.facts.waits_s) == (2, ())
+
+
+def test_an_abandoned_gate_before_a_connection_wait_does_not_sleep() -> None:
+    class AbandonedAtOnce(LocalGate):
+        def abandoned(self) -> bool:
+            return True
+
+    outcome, script, gateway = run(ConnectFail(), resp(), gate=AbandonedAtOnce())
+    assert (script.requests, gateway.sleeps, code(outcome)) == (1, [], "network_error")
+
+
+def test_return_to_idle_after_abandon_stays_abandoned_and_refuses_writing() -> None:
+    gate = LocalGate()
+    gate.abandon()
+    gate.return_to_idle()
+    assert gate.abandoned() is True
+    with pytest.raises(RuntimeError):
+        gate.enter_writing()
+
+
+def test_return_to_idle_from_writing_goes_idle() -> None:
+    gate = LocalGate()
+    gate.enter_writing()
+    gate.return_to_idle()
+    assert gate.state() is Gate.IDLE
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        ErrorSpec("outcome_unknown", retry=Retry.CONNECTION),
+        ErrorSpec("outcome_unknown", retry=Retry.RATE_LIMIT),
+        ErrorSpec("internal", after_writing=True, retry=Retry.CONNECTION),
+        ErrorSpec("internal", after_writing=True, retry=Retry.RATE_LIMIT),
+    ],
+    ids=["unknown-conn", "unknown-429", "writing-conn", "writing-429"],
+)
+def test_a_marked_spec_that_may_have_been_delivered_is_never_repeated(
+    spec: ErrorSpec, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(retry_module, "classify_response", lambda raw, op: spec)
+    monkeypatch.setattr(retry_module, "classify_exception", lambda exc, gate, op: spec)
+    assert spec.unknown_outcome or spec.after_writing
+    for step in (resp(429), WriteFail()):
+        outcome, script, gateway = run(step, resp())
+        assert (script.requests, gateway.sleeps) == (1, [])
+        assert outcome.result is spec
+
+
 # --- facts
 
 
@@ -533,6 +591,30 @@ def all_scripts(length: int) -> list[tuple[str, ...]]:
     return scripts
 
 
+def oracle(script: tuple[str, ...]) -> tuple[int, tuple[int, ...], str | int, int | None]:
+    """Independent model: (requests, waits, final code or HTTP status, retry_after_s)."""
+    rate = conn = 0
+    waits: list[int] = []
+    for n, kind in enumerate(script, start=1):
+        if kind == "200":
+            return n, tuple(waits), 200, None
+        if kind == "429" and rate < 2:
+            waits.append((2, 4)[rate])
+            rate += 1
+        elif kind == "refused" and conn < 1:
+            waits.append(2)
+            conn += 1
+        else:
+            final = {
+                "429": "rate_limited",
+                "refused": "network_error",
+                "write": "outcome_unknown",
+                "503": "upstream_error",
+            }[kind]
+            return n, tuple(waits), final, waits[-1] if kind == "429" else None
+    raise AssertionError("scripts are long enough to always end")
+
+
 @pytest.mark.parametrize("script", all_scripts(5), ids="-".join)
 def test_no_script_makes_more_than_four_requests_or_unbounded_waits(
     script: tuple[str, ...],
@@ -547,3 +629,9 @@ def test_no_script_makes_more_than_four_requests_or_unbounded_waits(
     kinds = script[: played.requests]
     for kind in kinds[:-1]:
         assert kind in ("429", "refused")
+    assert (
+        outcome.facts.requests,
+        tuple(gateway.sleeps),
+        code(outcome) if isinstance(outcome.result, ErrorSpec) else outcome.result.http_status,
+        outcome.retry_after_s,
+    ) == oracle(script)

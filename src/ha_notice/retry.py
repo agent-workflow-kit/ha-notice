@@ -68,7 +68,8 @@ class AttemptGate(Protocol):
         ...
 
     def return_to_idle(self) -> None:
-        """A complete 429 was read: the host accepted nothing."""
+        """A complete 429 was read: the host accepted nothing. Must be a no-op unless the gate
+        state is writing: it never undoes an abandon, and the loop calls it without checking."""
         ...
 
     def abandoned(self) -> bool:
@@ -77,22 +78,30 @@ class AttemptGate(Protocol):
 
 
 class LocalGate:
-    """A single-threaded gate with no lock and no deadline. TODO(#25): replaced by the real one."""
+    """A single-threaded gate with no lock and no deadline (``abandon`` is for tests).
+    TODO(#25): replaced by the real one."""
 
     def __init__(self) -> None:
         self._state = Gate.IDLE
+        self._abandoned = False
+
+    def abandon(self) -> None:
+        self._abandoned = True
 
     def enter_writing(self) -> None:
+        if self._abandoned:
+            raise RuntimeError("the send was abandoned")
         self._state = Gate.WRITING
 
     def state(self) -> Gate:
         return self._state
 
     def return_to_idle(self) -> None:
-        self._state = Gate.IDLE
+        if self._state is Gate.WRITING:
+            self._state = Gate.IDLE
 
     def abandoned(self) -> bool:
-        return False
+        return self._abandoned
 
 
 @dataclass(frozen=True)
@@ -184,8 +193,8 @@ def run_attempts(
             is_rate = False
         else:
             return outcome(result, requests, last_wait)
-        if not _fits(wait, remaining):
-            return outcome(result, requests, wait)
+        if not _fits(wait, remaining) or gate.abandoned():
+            return outcome(result, requests, wait)  # no wait is performed
         sleep(wait)
         waits.append(wait)
         if is_rate:
