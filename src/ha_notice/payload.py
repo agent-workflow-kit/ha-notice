@@ -25,6 +25,8 @@ cut, the prefix and the budget are in ``render.py`` (issue #17).
 The command-keyword check (issue #14) runs last inside ``validate_notification``, on the sanitized
 message. The link rule (issue #15) is in ``link.py`` and runs before the message checks, followed
 by the ``link_hosts`` check (issue #16); the send flow passes ``Config.link_hosts``.
+Actions (issue #37, JSON only, at most 3 URI actions) are checked after the link and before the
+message checks, with the same link rule and ``link_hosts`` check on each ``uri``.
 """
 
 from __future__ import annotations
