@@ -151,8 +151,14 @@ def test_exit_process_raises_instead_of_exiting() -> None:
     assert exc.value.code == 12 and g.exits == [12]
 
 
+def test_the_default_uid_is_the_real_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert FakeGateway().uid() == os.getuid()
+    monkeypatch.setattr(os, "getuid", lambda: 4242)
+    assert FakeGateway().uid() == 4242
+
+
 def test_state_dir_works_on_a_private_home(tmp_path: Path) -> None:
-    g = FakeGateway(user_id=os.getuid())
+    g = FakeGateway()
     fd = g.open_state_dir(str(tmp_path))
     g.close_fd(fd)
     assert (tmp_path / ".local" / "state" / "ha-notice").is_dir()

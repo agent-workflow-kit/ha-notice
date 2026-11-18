@@ -13,6 +13,7 @@ that the test sets, with a hard cap so a broken test fails instead of hanging.
 from __future__ import annotations
 
 import http.client
+import os
 import re
 import threading
 from collections import deque
@@ -210,7 +211,7 @@ class FakeGateway:
     resolve_block: threading.Event | None = None
     resolve_delay: float = 0.0  # seconds the fake clock advances inside resolve()
     home: str | HomeLookupError = "/nonexistent-fake-home"
-    user_id: int = 1000
+    user_id: int = field(default_factory=lambda: os.getuid())
     login: str | None = "fakeuser"
     tty_fds: set[int] = field(default_factory=set)
     sources: dict[int | str, bytes | StallingSource | SourceError] = field(default_factory=dict)
@@ -343,6 +344,7 @@ class _OwnedBy(gw.RealGateway):
     """The real state-directory code with the injected uid, so the owner check is the real one."""
 
     def __init__(self, uid: int) -> None:
+        super().__init__()
         self._uid = uid
 
     def uid(self) -> int:

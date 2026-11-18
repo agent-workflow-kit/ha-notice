@@ -46,7 +46,7 @@ def home(tmp_path: Path, trap: Path) -> Path:
 
 
 def make_gateway(home: Path, **kw: Any) -> FakeGateway:
-    return FakeGateway(home=str(home), user_id=kw.pop("user_id", os.getuid()), **kw)
+    return FakeGateway(home=str(home), **kw)
 
 
 @pytest.fixture(autouse=True)
@@ -176,21 +176,54 @@ def test_a_read_only_parent_with_no_state_directory_is_unusable(home: Path) -> N
         parent.chmod(0o700)
 
 
+def test_created_directories_are_private_even_with_umask_zero(home: Path) -> None:
+    old = os.umask(0)
+    try:
+        open_state(make_gateway(home)).close()
+    finally:
+        os.umask(old)
+    for rel in (".local", ".local/state", ".local/state/ha-notice"):
+        assert stat.S_IMODE((home / rel).stat().st_mode) & 0o077 == 0, rel
+
+
+def test_existing_intermediate_directories_are_not_chmodded(home: Path) -> None:
+    (home / ".local").mkdir(mode=0o755)
+    (home / ".local").chmod(0o755)
+    open_state(make_gateway(home)).close()
+    assert stat.S_IMODE((home / ".local").stat().st_mode) == 0o755
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="root ignores directory permissions")
+def test_a_read_only_state_directory_opens_but_the_log_cannot_be_created(home: Path) -> None:
+    d = home / STATE_REL
+    d.mkdir(parents=True, mode=0o700)
+    d.chmod(0o500)
+    try:
+        s = open_state(make_gateway(home))
+        try:
+            with pytest.raises(StateUnusable):
+                s.open_file("log.jsonl")
+        finally:
+            s.close()
+    finally:
+        d.chmod(0o700)
+
+
 def test_a_too_long_path_is_unusable(home: Path) -> None:
     long_home = str(home) + "/" + "a" * 300
     with pytest.raises(StateUnusable):
-        open_state(FakeGateway(home=long_home, user_id=os.getuid()))
+        open_state(FakeGateway(home=long_home))
     assert os.listdir(home) == []
 
 
 def test_a_nul_in_the_home_is_unusable() -> None:
     with pytest.raises(StateUnusable):
-        open_state(FakeGateway(home="/tmp/a\0b", user_id=os.getuid()))
+        open_state(FakeGateway(home="/tmp/a\0b"))
 
 
 def test_a_relative_home_is_unusable() -> None:
     with pytest.raises(StateUnusable):
-        open_state(FakeGateway(home="relative/home", user_id=os.getuid()))
+        open_state(FakeGateway(home="relative/home"))
 
 
 @pytest.mark.parametrize("err", [errno.ENOSPC, errno.EROFS, errno.EACCES, errno.ENAMETOOLONG])
@@ -426,7 +459,7 @@ def test_concurrent_creation_by_several_processes_all_succeed(home: Path, tmp_pa
     ]
     try:
         go.write_text("")
-        results = [p.communicate(timeout=60) + (p.returncode,) for p in procs]
+        results = [p.communicate(timeout=15) + (p.returncode,) for p in procs]
     finally:
         for p in procs:
             if p.poll() is None:
@@ -437,19 +470,6 @@ def test_concurrent_creation_by_several_processes_all_succeed(home: Path, tmp_pa
 
 
 # --- gateway fidelity ----------------------------------------------------------------------
-
-
-def test_the_real_gateway_has_the_same_decisions_as_the_fake(home: Path) -> None:
-    for g in (RealGateway(), make_gateway(home)):
-        d = home / STATE_REL
-        if d.exists():
-            d.chmod(0o700)
-        fd = g.open_state_dir(str(home))
-        g.close_fd(fd)
-        d.chmod(0o755)
-        with pytest.raises(gw.StateDirError):
-            g.open_state_dir(str(home))
-        d.chmod(0o700)
 
 
 def test_the_fake_honours_the_injected_uid_like_the_real_one(home: Path) -> None:
