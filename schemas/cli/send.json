@@ -77,7 +77,27 @@
           "maxLength": 2000
         },
         "data": {
-          "type": "object"
+          "type": "object",
+          "description": "Built only from the allowlist, in this order and omitted when empty: url and clickAction (the link), tag (awkit- plus 24 hex characters), group (config default_group).",
+          "properties": {
+            "url": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "clickAction": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "tag": {
+              "type": "string",
+              "pattern": "^awkit-[0-9a-f]{24}(?![\\s\\S])"
+            },
+            "group": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}(?![\\s\\S])"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [

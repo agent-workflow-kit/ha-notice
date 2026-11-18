@@ -18,7 +18,16 @@ build-backend = "hatchling.build"
 packages = ["src/ha_notice"]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "pyright>=1.1.380", "pymarkdownlnt>=0.9.41"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "pyright>=1.1.380",
+    "pymarkdownlnt>=0.9.41",
+    "jsonschema>=4.23",
+    "referencing>=0.35",
+    "pyyaml>=6",
+    "types-pyyaml>=6.0.12",
+]
 
 [tool.ruff]
 line-length = 100
