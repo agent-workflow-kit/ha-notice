@@ -97,6 +97,8 @@ EXIT_12_CELLS: list[tuple[str, dict[str, Any], tuple[bool, bool], tuple[bool, bo
     ("wrong_host_response", {"http_status": 404}, (False, False), (False, False)),
     ("wrong_host_response", {"http_status": 200}, (False, True), (False, True)),
     ("wrong_host_response", {"http_status": 204}, (False, True), (False, True)),
+    # an answer that is not HTTP after writing: no status, possibly delivered
+    ("wrong_host_response", {}, (False, True), (False, True)),
 ]
 
 
@@ -856,7 +858,7 @@ def test_every_accepted_cell_validates_against_the_error_schema() -> None:
         "upstream_error": [{"http_status": s} for s in (500, 502, 599)],
         "network_error": [{"tls": t, "timeout": o} for t in (True, False) for o in (True, False)],
         "outcome_unknown": [{}],
-        "wrong_host_response": [{"http_status": s} for s in (100, 200, 204, 302, 404, 599)],
+        "wrong_host_response": [{}] + [{"http_status": s} for s in (100, 200, 204, 302, 404, 599)],
         "unavailable": [{}, {"phase": "input"}],
     }
     assert set(base) == set(output.EXIT_CODES)
@@ -867,3 +869,25 @@ def test_every_accepted_cell_validates_against_the_error_schema() -> None:
             assert schema_errors("cli/error", result.envelope) == [], (code, details)
             accepted += 1
     assert accepted > 40
+
+
+def test_wrong_host_response_without_a_status_has_null_details_and_is_unknown() -> None:
+    error = _valid(build_error("wrong_host_response"))
+    assert (error["details"], error["retryable"], error["unknown_outcome"]) == (None, False, True)
+
+
+def test_the_schema_requires_a_status_for_wrong_host_response_unless_unknown() -> None:
+    def envelope(unknown: bool, details: dict[str, Any] | None) -> dict[str, Any]:
+        error = build_error("wrong_host_response", http_status=404).envelope
+        error["error"].update(unknown_outcome=unknown, details=details)
+        return error
+
+    assert schema_errors("cli/error", envelope(True, None)) == []
+    assert schema_errors("cli/error", envelope(True, {"http_status": 200})) == []
+    assert schema_errors("cli/error", envelope(False, {"http_status": 404})) == []
+    assert schema_errors("cli/error", envelope(False, None)) != []
+    assert schema_errors("cli/error", envelope(False, {})) != []
+    # the other response codes keep requiring the status
+    bad = build_error("auth_required", http_status=401).envelope
+    bad["error"]["details"] = None
+    assert schema_errors("cli/error", bad) != []
