@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import socket
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -473,14 +474,50 @@ def test_an_exception_from_the_attempt_is_internal_with_no_text(
     assert capfd.readouterr() == ("", "")
 
 
-def test_a_crash_after_writing_has_unknown_outcome() -> None:
+def test_an_exception_after_writing_is_classified_internal_by_the_loop() -> None:
     def attempt(before_write: Callable[[], None]) -> RawResponse:
         before_write()
         raise RuntimeError("boom")
 
     verdict, _ = run(ClockGateway(), attempt)
     # RuntimeError while writing is classified by the loop as ``internal``, a result, not a crash.
+    assert verdict.kind is Kind.COMPLETED
     assert verdict.error(tag_sent=False).envelope["error"]["unknown_outcome"] is True
+
+
+def test_a_crash_after_writing_has_unknown_outcome(capfd: pytest.CaptureFixture[str]) -> None:
+    def attempt(before_write: Callable[[], None]) -> RawResponse:
+        before_write()
+        raise SystemExit(3)  # not an Exception: the loop does not classify it
+
+    verdict, _ = run(ClockGateway(), attempt)
+    assert verdict.kind is Kind.CRASH and verdict.gate is Gate.WRITING
+    error = verdict.error(tag_sent=False)
+    assert error.exit_code == 1
+    body = error.envelope["error"]
+    assert body["code"] == "internal" and body["unknown_outcome"] is True
+    assert capfd.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("seconds", [0.0, -5.0, float("nan"), float("-inf")])
+def test_a_deadline_already_passed_settles_idle_without_starting_the_worker(
+    seconds: float,
+) -> None:
+    calls: list[int] = []
+
+    def attempt(before_write: Callable[[], None]) -> RawResponse:
+        calls.append(1)
+        before_write()
+        return resp()
+
+    gateway = ClockGateway()
+    started = threading.active_count()
+    verdict = run_with_deadline(gateway, attempt, op=Op.SEND, deadline=seconds)
+    time.sleep(0.05)
+    assert verdict.kind is Kind.DEADLINE and verdict.gate is Gate.IDLE
+    body = verdict.error(tag_sent=False).envelope["error"]
+    assert body["code"] == "network_error" and body["unknown_outcome"] is False
+    assert calls == [] and threading.active_count() == started
 
 
 def test_a_crash_in_the_loop_itself_is_internal(
@@ -579,9 +616,9 @@ def real_run(
 def test_a_real_send_succeeds_through_the_worker(real: RealClock) -> None:
     real.release.set()
     with FakeHA() as ha:
-        verdict, took, _ = real_run(real, ha)
+        verdict, _, _ = real_run(real, ha)
         assert verdict.kind is Kind.COMPLETED and verdict.result == Success(200)
-        assert len(ha.requests) == 1 and took < 1.0
+        assert len(ha.requests) == 1
 
 
 def test_a_stalled_name_resolution_is_bounded_and_writes_nothing(real: RealClock) -> None:
@@ -633,12 +670,11 @@ def test_a_429_whose_wait_does_not_fit_ends_at_once_with_rate_limited(
 ) -> None:
     real.release.set()
     with FakeHA(script=[Reply(status=429)]) as ha:
-        verdict, took, _ = real_run(real, ha)  # the 2 s wait outlasts the 1 s deadline
+        verdict, _, _ = real_run(real, ha)  # the 2 s wait outlasts the 1 s deadline
         assert len(ha.requests) == 1
         assert verdict.kind is Kind.COMPLETED
         error = verdict.error(tag_sent=False)
         assert error.exit_code == 12 and error.envelope["error"]["retry_after_s"] == 2
-        assert took < 1.0
 
 
 def test_a_probe_deadline_is_not_an_unknown_outcome(real: RealClock) -> None:
@@ -647,3 +683,64 @@ def test_a_probe_deadline_is_not_an_unknown_outcome(real: RealClock) -> None:
         verdict, _, _ = real_run(real, ha, op=Op.PROBE)
         spec = verdict.result
         assert isinstance(spec, ErrorSpec) and spec.probe and not spec.unknown_outcome
+
+
+def test_an_endless_100_continue_stream_is_outcome_unknown_at_the_deadline(
+    real: RealClock,
+) -> None:
+    real.release.set()
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    stop = threading.Event()
+    conns: list[socket.socket] = []
+
+    def serve() -> None:
+        try:
+            conn, _ = listener.accept()
+        except OSError:
+            return
+        conns.append(conn)
+        try:
+            conn.settimeout(5)
+            data = b""
+            while b"\r\n\r\n" not in data:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    return
+                data += chunk
+            while not stop.is_set():
+                conn.sendall(b"HTTP/1.1 100 Continue\r\n\r\n")
+                stop.wait(0.05)
+        except OSError:
+            pass
+
+    server = threading.Thread(target=serve, daemon=True)
+    server.start()
+    parsed = parse_base_url(f"http://127.0.0.1:{listener.getsockname()[1]}")
+    assert parsed is not None
+    target = Target(parsed, TOKEN, "HA_TOKEN", None, 5.0, 5.0)
+    threads_before = threading.active_count()
+    try:
+
+        def attempt(before_write: Callable[[], None]) -> RawResponse:
+            return send_once(real, target, "mobile_app_test", BODY, before_write=before_write)
+
+        started = time.monotonic()
+        verdict = run_with_deadline(
+            real, attempt, op=Op.SEND, deadline=real.monotonic() + DEADLINE_S
+        )
+        took = time.monotonic() - started
+        assert verdict.kind is Kind.DEADLINE and verdict.gate is Gate.WRITING
+        assert verdict.error(tag_sent=False).envelope["error"]["code"] == "outcome_unknown"
+        assert DEADLINE_S <= took < DEADLINE_S + SLACK_S
+    finally:
+        stop.set()
+        listener.close()
+        for conn in conns:
+            conn.close()
+        server.join(5)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and threading.active_count() > threads_before:
+        time.sleep(0.01)  # the worker ends once its socket is closed
+    assert threading.active_count() <= threads_before

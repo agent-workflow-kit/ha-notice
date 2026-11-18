@@ -25,7 +25,8 @@ docs/interface.md (Home Assistant edge, Deadline) is normative. In short:
   text and class are dropped.
 
 TODO(#26): the ``stop`` callable is the seam for the signal handler: a stop is decided like the
-deadline. TODO(#27): the send flow prints, logs and calls ``finish``.
+deadline. TODO(#27): the send flow prints, logs and calls ``finish``; ``finish`` does not flush
+stdout or stderr, so the flow prints and flushes before it.
 """
 
 from __future__ import annotations
@@ -208,10 +209,14 @@ def run_with_deadline(
     ``deadline`` is an absolute ``gateway.monotonic()`` time (the start of input plus
     ``timeout``). ``attempt(before_write)`` makes one request (``hass.send_once`` and
     ``probe_once`` with the target bound). ``stop`` is polled between slices; a true value is
-    decided like the deadline (TODO(#26): the signal handler). Returns at the deadline plus at
+    decided like the deadline (TODO(#26): the signal handler; a raising ``stop`` must still
+    settle, so the handler only reads a flag). Returns at the deadline plus at
     most one slice; it never joins the worker.
     """
     the_gate = WritingGate() if gate is None else gate
+    probe = op is Op.PROBE
+    if not deadline - gateway.monotonic() > 0:  # already passed, or NaN: no worker, no attempt
+        return the_gate.settle(probe=probe)  # a result already published still wins
 
     def remaining() -> float:
         return max(0.0, deadline - gateway.monotonic())
@@ -226,8 +231,9 @@ def run_with_deadline(
             the_gate.publish_crash()
 
     worker = threading.Thread(target=work, name=WORKER_NAME, daemon=True)
+    # todo(#27): start() can raise RuntimeError (cannot start new thread): map it to exit 1
+    # internal in the send flow.
     worker.start()
-    probe = op is Op.PROBE
     while not the_gate.wait(0):
         left = deadline - gateway.monotonic()
         if not left > 0 or (stop is not None and stop()):  # false for NaN
