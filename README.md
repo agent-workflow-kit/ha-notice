@@ -33,7 +33,7 @@ To pin a release, append `@v<version>` (a tag from the repository's releases) to
 ## Quick start
 
 1. Create a long-lived access token. In Home Assistant open your profile (your user name at the bottom of the sidebar), choose the Security tab, scroll to Long-lived access tokens and create one. A dedicated Home Assistant user for notifications limits what a leaked token can do, because the token is valid for the whole Home Assistant API.
-2. Put the token in an environment variable. The variable's name is set by `token_env` in the config (default `HA_TOKEN`) and must match `HA_[A-Z0-9_]{1,60}` as a whole, so a config cannot name another secret. For a shell session: `export HA_TOKEN=...`. The token is read only from this variable, never from argv, a config file or a prompt, so do not put it in the config or on a command line that your shell history records; read it from a mode-0600 file or a secret manager instead. Cron and hook guidance (an env file sourced by the cron line) is pending in [#33](https://github.com/agent-workflow-kit/ha-notice/issues/33).
+2. Put the token in an environment variable. The variable's name is set by `token_env` in the config (default `HA_TOKEN`) and must match `HA_[A-Z0-9_]{1,60}` as a whole, so a config cannot name another secret. For a shell session: `export HA_TOKEN=...`. The token is read only from this variable, never from argv, a config file or a prompt, so do not put it in the config or on a command line that your shell history records; read it from a mode-0600 file or a secret manager instead. For cron and hooks, keep the token in a mode-0600 env file that the cron line sources; see [Calling from automation](#calling-from-automation).
 3. Find the service name. This needs a Home Assistant administrator, because Developer tools is admin only; if the dedicated user is not an administrator, ask one or look it up with your own account. Open Developer tools, then Actions (older versions call it Services), and search for `notify.`. A phone running the companion app is a service named `notify.mobile_app_<device>`; the config key `service` is the part after `notify.`.
 4. Write the config at `.config/ha-notice/config.yaml` under the account's home directory. Only two keys are required:
 
@@ -251,9 +251,23 @@ Only `code` and `message` are always meaningful; the other keys are null when th
 
 ## Calling from automation
 
-Cron jobs, hooks and scripts call `ha-notice send --stdin-json --json --actor auto:<name>` with the payload on stdin, and decide by exit code: treat 22 as success, never retry 20, retry only exit 12 with `retryable` true (with your own backoff and a cap; when `unknown_outcome` is also true, only if you passed `--dedupe-key` and no newer notification with that key has been sent), treat an exit 1 without an envelope as outcome unknown, and wait at least `timeout` plus 10 s before killing the tool. The full rules for callers are in [Calling from automation](docs/interface.md#calling-from-automation). Cron examples and token env-file guidance are tracked in [#33](https://github.com/agent-workflow-kit/ha-notice/issues/33) and will be added to this README; until then use the interface document. Automation must not call `validate --test-message`.
+Cron jobs, hooks and scripts call `ha-notice send --stdin-json --json --actor auto:<name>` with the payload on stdin, and decide by exit code: treat 22 as success, never retry 20, retry only exit 12 with `retryable` true (with your own backoff and a cap; when `unknown_outcome` is also true, only if you passed `--dedupe-key` and no newer notification with that key has been sent), treat an exit 1 without an envelope as outcome unknown, and wait at least `timeout` plus 10 s before killing the tool. The full rules for callers are in [Calling from automation](docs/interface.md#calling-from-automation). Automation must not call `validate --test-message`, which sends a real notification.
 
-<!-- TODO(#33): cron example, mode-0600 token env file, kill timeout >= timeout+10 s, rc handling for exit 22 -->
+The practical guide is [docs/automation.md](docs/automation.md): the token env file, the cron line, a wrapper that handles every exit code, a retry loop, a health check and a hook that never blocks. In short, create the env file with mode 0600 (`umask 077` and `install -m 600` keep the token out of other users' reach), and source it in the cron line with `set -a` so that the variable reaches the tool:
+
+```sh
+umask 077
+mkdir -p ~/.config/ha-notice
+install -m 600 /dev/null ~/.config/ha-notice/env
+${EDITOR:-vi} ~/.config/ha-notice/env
+```
+
+```crontab
+PATH=/home/me/.local/bin:/usr/bin:/bin
+*/15 * * * * set -a; . "$HOME/.config/ha-notice/env"; set +a; /home/me/bin/check-disk
+```
+
+Put `HA_TOKEN='...'` in the env file (or alias another name to it). Never put the token in the crontab or on a command line, and call the tool with a kill timeout of at least `timeout` plus 10 s, for example `timeout 20 ha-notice ...` with the default `timeout` of 10 s. Cron mails any output, so wrap the call: treat exit 22 (disabled) as success with `rc=$?; [ "$rc" = 22 ] && rc=0` and print the error envelope only on a real failure. The cron line finds the config from the password-database home, so cron's own `HOME` does not matter to the tool.
 
 ## Signals and timing
 
@@ -295,6 +309,7 @@ The maintainer's live suite (`pytest -m live -s`, never in CI) sends real notifi
 ## Documentation
 
 - [docs/interface.md](docs/interface.md): normative interface
+- [docs/automation.md](docs/automation.md): cron, scripts and hooks
 - [docs/design.md](docs/design.md): decisions and internals
 - [docs/plan.md](docs/plan.md): staged implementation plan
 - [docs/live-tests.md](docs/live-tests.md): the live test suite

@@ -261,17 +261,16 @@ def test_readme_has_links() -> None:
     assert len(_local_links(README)) > 10
 
 
-def _has_pending_marker(text: str) -> bool:
-    return any(
-        line.startswith("<!-- TODO(#33):") and line.endswith("-->") for line in text.splitlines()
-    )
+def test_readme_automation_section_has_the_cron_guidance() -> None:
+    text = README.read_text(encoding="utf-8")
+    section = text.split("## Calling from automation", 1)[1].split("\n## ", 1)[0]
+    assert "(docs/automation.md)" in section
+    assert "install -m 600" in section and "set -a" in section
+    assert "plus 10 s" in section and '[ "$rc" = 22 ] && rc=0' in section
 
 
-def test_readme_keeps_the_pending_automation_marker() -> None:
-    # Remove this test and the marker in README.md together when #33 lands.
-    assert _has_pending_marker(README.read_text(encoding="utf-8")), "remove with #33"
-
-
-def test_pending_marker_must_be_a_whole_comment_line() -> None:
-    assert not _has_pending_marker("text <!-- TODO(#33): x -->")
-    assert not _has_pending_marker("<!-- TODO(#33): unterminated")
+def test_readme_has_no_pending_automation_marker() -> None:
+    text = README.read_text(encoding="utf-8")
+    assert "TODO(#33)" not in text
+    assert "later README revision" not in text
+    assert "issues/33" not in text
