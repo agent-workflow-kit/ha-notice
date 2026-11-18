@@ -16,7 +16,8 @@ parse failure); it hands the parsed value to ``validate_notification``.
 The sanitizer (issue #13, docs/interface.md, Sanitizer) runs inside ``validate_notification``, so
 ``Notification.title`` and ``Notification.message`` hold the sanitized text. TODO(#17): the title
 and message cut, the prefix and the budget (rendering).
-TODO(#14): the command-keyword check. TODO(#15): the link rule. TODO(#16): ``link_hosts``.
+The command-keyword check (issue #14) runs last inside ``validate_notification``, on the sanitized
+message. TODO(#15): the link rule. TODO(#16): ``link_hosts``.
 """
 
 from __future__ import annotations
@@ -35,8 +36,12 @@ DEFAULT_LEVEL = "info"
 FIELDS = ("title", "message", "level", "link")  # the order in which known fields are checked
 
 
+_NO_POINTER = frozenset({"empty_message", "command_keyword"})
+
+
 class PayloadError(Exception):
-    """A refused notification (exit 20). ``reason`` is ``invalid_payload`` or ``empty_message``;
+    """A refused notification (exit 20). ``reason`` is ``invalid_payload``, ``empty_message`` or
+    ``command_keyword`` (the last two have no details);
     ``field`` is the offending field name (``None`` for the document itself) and is only ever
     turned into a pointer through ``safe_pointer``. Neither is built from an input value except
     the field name, which is never printed raw."""
@@ -48,12 +53,12 @@ class PayloadError(Exception):
 
     @property
     def pointer(self) -> str | None:
-        """``details.pointer``; ``None`` for ``empty_message`` (it has no pointer)."""
-        return None if self.reason == "empty_message" else safe_pointer(self.field)
+        """``details.pointer``; ``None`` for ``empty_message`` and ``command_keyword``."""
+        return None if self.reason in _NO_POINTER else safe_pointer(self.field)
 
     def to_error(self) -> ErrorResult:
-        if self.reason == "empty_message":
-            return build_error("refused", reason="empty_message")
+        if self.reason in _NO_POINTER:
+            return build_error("refused", reason=self.reason)
         return build_error("refused", reason=self.reason, pointer=self.pointer)
 
 
@@ -121,6 +126,21 @@ def is_empty_text(text: str) -> bool:
     return all(ch.isspace() or unicodedata.category(ch) in _MARKS for ch in text)
 
 
+# --- command keywords (docs/interface.md, Command messages) ---------------------------------
+
+# fullmatch on the folded value; the class is bounded and has no nesting, so it is linear.
+_COMMAND_FAMILY = re.compile(r"(?:command|kiosk|update|clear|remove|request)_[a-z0-9_]*")
+
+
+def check_command_keyword(message: str) -> bool:
+    """True when the companion apps would take the sanitized ``message`` for a command: after
+    NFKC, casefold and strip it equals ``tts`` or is one token of a listed family. Kept Cf
+    characters (ZWJ, ZWNJ) are not removed by NFKC, so ``tts`` with one inside is not refused
+    (the interface fixes this exact formula)."""
+    folded = unicodedata.normalize("NFKC", message).casefold().strip()
+    return folded == "tts" or _COMMAND_FAMILY.fullmatch(folded) is not None
+
+
 @dataclass(frozen=True)
 class Notification:
     """A notification whose fields passed the checks of this module. ``title`` and ``message`` are
@@ -148,7 +168,7 @@ def validate_notification(obj: object) -> Notification:
     value that is not an object (pointer ``""``), then unknown fields (the smallest name), then the
     known fields in the order title, message, level, link (wrong type, over 100000 characters, a
     lone surrogate, level outside the vocabulary), and last a message that is absent or empty after
-    sanitizing (``empty_message``).
+    sanitizing (``empty_message``) or a command message (``command_keyword``).
     ``null`` is a wrong type, never an absent field.
     """
     if not isinstance(obj, Mapping):
@@ -181,6 +201,9 @@ def validate_notification(obj: object) -> Notification:
         link = obj["link"]
     if message is None or is_empty_text(message):
         raise PayloadError("empty_message")
+    # TODO(#15): decide the order against the link failures when the link rule lands.
+    if check_command_keyword(message):
+        raise PayloadError("command_keyword")
     return Notification(message=message, level=level, title=title, link=link)
 
 
