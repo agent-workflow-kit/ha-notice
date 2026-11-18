@@ -19,16 +19,32 @@ Parsing rules (docs/interface.md, Global flags, Input and Output):
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any, TextIO
+from dataclasses import dataclass, field
+from typing import Any
 
 from ha_notice import __version__
 from ha_notice.gateway import Gateway, RealGateway
+from ha_notice.output import (
+    EXIT_DISABLED,
+    EXIT_FAILED,
+    EXIT_INTERNAL,
+    EXIT_OK,
+    EXIT_REFUSED,
+    EXIT_USAGE,
+    dumps,
+    emit_error,
+    emitted_exit,
+    fail,
+    flush_streams,
+    reset_emitted,
+    write_text,
+)
+
+__all__ = ["dumps", "emit_error", "write_text"]  # re-exported (see output.py)
 
 # interface.md, send: the whole string must match (re.fullmatch, never re.match or a `$`).
 ACTOR_RE = re.compile(r"(?:human|auto):[A-Za-z0-9._@/-]{1,64}")
@@ -65,84 +81,6 @@ class _ParserExit(Exception):
     def __init__(self, status: int) -> None:
         super().__init__(status)
         self.status = status
-
-
-# --- output ---------------------------------------------------------------------------------
-
-
-def _discard_pending(stream: Any) -> None:
-    """Point the stream's descriptor at the null device after a failed write, so that the data
-    still buffered cannot fail again (and change the exit code) at interpreter shutdown."""
-    try:
-        fd = stream.fileno()
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        try:
-            os.dup2(devnull, fd)
-        finally:
-            os.close(devnull)
-    except Exception:  # noqa: BLE001 - best effort, never changes the exit code
-        pass
-
-
-def write_text(stream: TextIO | None, text: str) -> None:
-    """Write ``text`` as UTF-8 with errors replaced, never through the locale; ignore failures.
-
-    A failure to write (``BrokenPipeError`` or any ``OSError``, a closed stream, a missing stream)
-    never changes the exit code. TODO(#7): the exact flush and ordering rules of the output step.
-    """
-    if stream is None:
-        return
-    data = text.encode("utf-8", errors="replace")
-    try:
-        buffer = getattr(stream, "buffer", None)
-        if buffer is not None:
-            stream.flush()
-            buffer.write(data)
-            buffer.flush()
-        else:
-            stream.write(data.decode("utf-8"))
-            stream.flush()
-    except Exception:  # noqa: BLE001 - output failures are ignored (OSError, ValueError, ...)
-        _discard_pending(stream)
-
-
-def dumps(obj: Any) -> str:
-    """The serialization of every JSON document the tool prints (interface.md, send)."""
-    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-
-
-def error_envelope(
-    code: str,
-    message: str,
-    *,
-    reason: str | None = None,
-    details: dict[str, Any] | None = None,
-    retryable: bool | None = None,
-    retry_after_s: int | float | None = None,
-    unknown_outcome: bool | None = None,
-) -> dict[str, Any]:
-    return {
-        "error": {
-            "code": code,
-            "message": message,
-            "reason": reason,
-            "details": details,
-            "retryable": retryable,
-            "retry_after_s": retry_after_s,
-            "unknown_outcome": unknown_outcome,
-        }
-    }
-
-
-def emit_error(json_mode: bool, envelope: dict[str, Any]) -> None:
-    """One line on stderr always (``<code>: <message>``); the envelope on stdout with --json.
-
-    TODO(#7): ``refused (<reason>): <message>`` for exit 20 and the full exit-code table.
-    """
-    error = envelope["error"]
-    write_text(sys.stderr, f"{error['code']}: {error['message']}\n")
-    if json_mode:
-        write_text(sys.stdout, dumps(envelope) + "\n")
 
 
 # --- parser ---------------------------------------------------------------------------------
@@ -310,6 +248,15 @@ class ValidateArgs:
     test_message: bool
 
 
+class Progress:
+    """How far a handler got. The send flow sets ``writing`` when the gate reaches ``writing``;
+    after that, an internal failure is reported with ``unknown_outcome`` true (interface.md,
+    Exit codes). TODO(#27): the send flow sets it."""
+
+    def __init__(self) -> None:
+        self.writing = False
+
+
 @dataclass(frozen=True)
 class Invocation:
     """Everything a command handler gets: the parsed flags, the environment and the gateway."""
@@ -326,6 +273,7 @@ class Invocation:
     gateway: Gateway
     send: SendArgs | None = None
     validate: ValidateArgs | None = None
+    progress: Progress = field(default_factory=Progress)
 
 
 def resolve_actor(flag: str | None, gateway: Gateway) -> tuple[str, str]:
@@ -447,13 +395,7 @@ def parse(argv: Sequence[str], env: Mapping[str, str], gateway: Gateway) -> Invo
 
 def _not_implemented(inv: Invocation) -> int:
     """Fail closed: a command whose owner issue has not landed never reports success."""
-    emit_error(
-        inv.json,
-        error_envelope(
-            "internal", "command not implemented", retryable=False, unknown_outcome=False
-        ),
-    )
-    return 1
+    return fail(inv.json, "internal", message="command not implemented")
 
 
 def _send(inv: Invocation) -> int:
@@ -471,6 +413,36 @@ def _validate(inv: Invocation) -> int:
 HANDLERS: dict[str, Callable[[Invocation], int]] = {"send": _send, "validate": _validate}
 
 
+# Exit codes a handler may return (docs/interface.md, Exit codes); 128+N is #26's.
+HANDLER_EXIT_CODES = frozenset(
+    {EXIT_OK, EXIT_INTERNAL, EXIT_USAGE, EXIT_FAILED, EXIT_REFUSED, EXIT_DISABLED}
+)
+
+
+def _run(args: list[str], environment: Mapping[str, str], gw: Gateway) -> int:
+    reset_emitted()  # a direct call must not see state leaked from an earlier run
+    try:
+        inv = parse(args, environment, gw)
+    except _ParserExit as done:
+        return done.status
+    except UsageError as err:
+        return fail(wants_json(args), "usage", message=err.message)
+    except Exception:  # noqa: BLE001 - e.g. gateway.isatty or login_name; nothing of it is printed
+        return fail(wants_json(args), "internal")
+    try:
+        code = HANDLERS[inv.command](inv)
+        if type(code) is not int or code not in HANDLER_EXIT_CODES:
+            raise ValueError("a handler returned something that is not an exit code")
+    except Exception:  # noqa: BLE001 - the class and text of the exception are never printed
+        # TODO(#26): BaseException (SystemExit, KeyboardInterrupt) is not caught here; #26 owns
+        # it with the signal handling (exit 128+N, no envelope; the SystemExit text is not printed).
+        done = emitted_exit()
+        if done is not None:  # one envelope per run: the handler already printed its own
+            return done
+        return fail(inv.json, "internal", after_writing=inv.progress.writing)
+    return code
+
+
 def main(
     argv: list[str] | None = None,
     env: Mapping[str, str] | None = None,
@@ -478,17 +450,19 @@ def main(
 ) -> int:
     """Run the CLI and return the exit code. ``env`` and ``gateway`` default to the process
     environment and the real gateway; process tests pass their own (no test-only environment seam
-    exists). Both are threaded to the command handlers through ``Invocation``."""
-    args = sys.argv[1:] if argv is None else list(argv)
-    environment = dict(os.environ) if env is None else env
-    gw = RealGateway() if gateway is None else gateway
-    # TODO(#7): unexpected exceptions (also from parse: gateway.isatty, login_name) must be caught
-    # here as exit 1 internal with the envelope; only _ParserExit and UsageError are handled now.
+    exists). Both are threaded to the command handlers through ``Invocation``.
+
+    An unexpected exception (also from parsing) is exit 1 ``internal``: the envelope and the line
+    carry the fixed message only, never the exception's class or text, so that nothing that was
+    read (input, config, credential) can leak. If even printing that fails, the exit code is
+    still 1 (the envelope on exit 1 is best effort). Both streams get one last flush attempt."""
+    reset_emitted()
     try:
-        inv = parse(args, environment, gw)
-    except _ParserExit as done:
-        return done.status
-    except UsageError as err:
-        emit_error(wants_json(args), error_envelope("usage", err.message))
-        return 2
-    return HANDLERS[inv.command](inv)
+        args = sys.argv[1:] if argv is None else list(argv)
+        environment = dict(os.environ) if env is None else env
+        gw = RealGateway() if gateway is None else gateway
+        code = _run(args, environment, gw)
+    except Exception:  # noqa: BLE001 - last resort
+        code = EXIT_INTERNAL
+    flush_streams()
+    return code

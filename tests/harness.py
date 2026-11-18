@@ -14,7 +14,9 @@ to check. A symlink at any component below the golden root is refused in both mo
 TODO(#30): golden files for every --json output, request body and log record.
 Usage-error goldens (#6) live in tests/golden/output/usage-*.json; the version line is not a
 golden because the release job bumps the version (tests/test_cli.py compares with pyproject).
-TODO(#7): golden files for send and validate output.
+Goldens of the error envelope and of the disabled outcome (#7) are
+tests/golden/output/error-*.json and disabled.json.
+TODO(#27): golden files for send output. TODO(#28): golden files for validate output.
 """
 
 from __future__ import annotations
