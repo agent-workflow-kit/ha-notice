@@ -24,9 +24,9 @@ docs/interface.md (Home Assistant edge, Deadline) is normative. In short:
   ``unknown_outcome`` only if the gate was writing). The worker prints nothing and the exception
   text and class are dropped.
 
-TODO(#26): the ``stop`` callable is the seam for the signal handler: a stop is decided like the
-deadline. TODO(#27): the send flow prints, logs and calls ``finish``; ``finish`` does not flush
-stdout or stderr, so the flow prints and flushes before it.
+The ``stop`` callable is the seam for the signal handler (``signals.SignalState.stopped``): a stop
+is decided like the deadline. TODO(#27): the send flow prints, logs and calls ``finish``;
+``finish`` does not flush stdout or stderr, so the flow prints and flushes before it.
 """
 
 from __future__ import annotations
@@ -209,8 +209,8 @@ def run_with_deadline(
     ``deadline`` is an absolute ``gateway.monotonic()`` time (the start of input plus
     ``timeout``). ``attempt(before_write)`` makes one request (``hass.send_once`` and
     ``probe_once`` with the target bound). ``stop`` is polled between slices; a true value is
-    decided like the deadline (TODO(#26): the signal handler; a raising ``stop`` must still
-    settle, so the handler only reads a flag). Returns at the deadline plus at
+    decided like the deadline (the signal handler's flag; a raising ``stop`` propagates unsettled,
+    so ``stop`` must only read a flag). Returns at the deadline plus at
     most one slice; it never joins the worker.
     """
     the_gate = WritingGate() if gate is None else gate

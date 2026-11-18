@@ -26,6 +26,7 @@ FORBIDDEN = (
     "pwd",
     "select",
     "fcntl",
+    "signal",
 )
 # The gateway itself never uses these.
 FORBIDDEN_EVERYWHERE = ("urllib", "subprocess")
@@ -124,7 +125,7 @@ def test_scanner_flags_each_forbidden_import_shape() -> None:
     assert _violations("import subprocess") == {"subprocess"}
     assert _violations("import timeit, json") == set()
     assert _violations("from time import monotonic") >= {"time"}
-    for module in ("socket", "ssl", "pwd", "select", "fcntl", "http"):
+    for module in ("socket", "ssl", "pwd", "select", "fcntl", "signal", "http"):
         assert _violations(f"import {module}") == {module}, module
     assert _violations("import http.server") >= {"http.server"}
 

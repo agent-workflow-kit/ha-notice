@@ -32,7 +32,7 @@ EXIT_USAGE = 2
 EXIT_FAILED = 12
 EXIT_REFUSED = 20
 EXIT_DISABLED = 22  # not an error: nothing was sent because the config disables the tool
-# 128 + N (129 SIGHUP, 130 SIGINT, 143 SIGTERM) is exit 128+N, no envelope: TODO(#26) signals.
+# 128 + N (129 SIGHUP, 130 SIGINT, 143 SIGTERM) is exit 128+N, no envelope: signals.py.
 
 # Exits 10, 11, 13 and 21 are never used (docs/interface.md, Exit codes).
 EXIT_CODES: dict[str, int] = {

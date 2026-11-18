@@ -17,8 +17,8 @@ Input reading (issue #12): ``read_notification`` reads the source through the ga
 Every parse failure is ``invalid_payload`` with pointer ``""``. A stalled producer is
 ``InputTimeout`` (exit 12 ``unavailable``, see ``input_timeout_error``); a bad ``--file`` is the
 gateway's ``SourceError`` (exit 2 ``usage``), which the caller maps.
-TODO(#26): signals during input (exit 128+N); the caller's ``remaining`` returns 0 on a signal,
-which today reads as a timeout.
+Signals (issue #26): the caller's ``remaining`` returns 0 on a signal (``SignalState.bound``); the
+caller checks the flag before it maps ``InputTimeout`` (``send.run_send``).
 The sanitizer (issue #13, docs/interface.md, Sanitizer) runs inside ``validate_notification``, so
 ``Notification.title`` and ``Notification.message`` hold the sanitized text. The title and message
 cut, the prefix and the budget are in ``render.py`` (issue #17).
