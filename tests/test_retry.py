@@ -513,3 +513,37 @@ def test_a_truncated_head_is_one_request_and_possibly_delivered() -> None:
         assert ha.connections == 1
     assert (count, fake.sleeps) == (1, [])
     assert outcome.result.unknown_outcome is True  # type: ignore[union-attr]
+
+
+# --- every script up to five steps long
+
+KINDS: dict[str, Callable[[], Step]] = {
+    "429": lambda: resp(429),
+    "refused": lambda: ConnectFail(),
+    "write": lambda: WriteFail(),
+    "200": lambda: resp(),
+    "503": lambda: resp(503),
+}
+
+
+def all_scripts(length: int) -> list[tuple[str, ...]]:
+    scripts: list[tuple[str, ...]] = [()]
+    for _ in range(length):
+        scripts = [s + (k,) for s in scripts for k in KINDS]
+    return scripts
+
+
+@pytest.mark.parametrize("script", all_scripts(5), ids="-".join)
+def test_no_script_makes_more_than_four_requests_or_unbounded_waits(
+    script: tuple[str, ...],
+) -> None:
+    outcome, played, gateway = run(*(KINDS[k]() for k in script))
+    assert played.requests <= 4
+    assert set(gateway.sleeps) <= {2, 4} and sum(gateway.sleeps) <= 8
+    assert outcome.facts.requests == played.requests
+    assert outcome.facts.rate_limit_retries <= 2 and outcome.facts.connection_retries <= 1
+    assert len(gateway.sleeps) == played.requests - 1 or isinstance(outcome.result, ErrorSpec)
+    # nothing follows a write-phase failure, a 5xx or a success
+    kinds = script[: played.requests]
+    for kind in kinds[:-1]:
+        assert kind in ("429", "refused")
