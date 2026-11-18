@@ -14,7 +14,7 @@ from jsonschema import Draft202012Validator
 
 from ha_notice.config import DEFAULTS
 from ha_notice.payload import Notification, validate_notification
-from ha_notice.render import MARKER, Rendered, render, serialize
+from ha_notice.render import MARKER, Rendered, message_sha256, render, serialize
 from tests.harness import Golden, load_schema
 
 PREFIX = dict(DEFAULTS["level_prefix"])
@@ -479,3 +479,73 @@ def test_golden_minimal_request_body(golden: Golden) -> None:
     raw = serialize(r("hello").body)
     golden.check("request", "minimal.json", raw.decode("utf-8"))
     assert raw == b'{"message":"hello"}'
+
+
+# --- review round 1 -------------------------------------------------------------------------
+
+
+def test_non_ascii_scheme_lookalike_is_refused() -> None:
+    with pytest.raises(ValueError) as exc:
+        r(link="http\u017f://a.example")
+    assert "a.example" not in str(exc.value)
+
+
+@pytest.mark.parametrize("bad", [0, 11, 99, 2001, -1, 1000.0, "1000", None, True])
+def test_max_chars_outside_100_to_2000_or_not_int_is_refused(bad: Any) -> None:
+    with pytest.raises(ValueError) as exc:
+        r("hello", max_chars=bad)
+    assert "2001" not in str(exc.value)
+
+
+@pytest.mark.parametrize("ok", [100, 2000])
+def test_max_chars_bounds_are_accepted(ok: int) -> None:
+    assert r("hello", max_chars=ok).body == {"message": "hello"}
+
+
+def _digest(title: str, message: str) -> str:
+    return hashlib.sha256(f"{title}\n{message}".encode()).hexdigest()[:16]
+
+
+def test_message_sha256_fixed_vectors() -> None:
+    assert message_sha256(None, "hello") == _digest("", "hello")
+    assert message_sha256(None, "hello") == "a1ad92f331dce2e0"
+    assert message_sha256("t", "m") == _digest("t", "m")
+    assert message_sha256("Backup échoué", "Grüße 😀") == _digest("Backup échoué", "Grüße 😀")
+
+
+def test_message_sha256_empty_title_equals_absent() -> None:
+    assert message_sha256("", "x") == message_sha256(None, "x")
+
+
+def test_message_sha256_separates_title_from_message() -> None:
+    assert message_sha256("a", "b") == message_sha256("a", "b")
+    assert message_sha256("ab", "") != message_sha256("a", "b")
+
+
+def test_message_sha256_is_over_the_uncut_text() -> None:
+    long = "a" * 5000
+    assert len(r(long).body["message"]) < 5000
+    assert message_sha256(None, long) == _digest("", long)
+
+
+def test_title_cut_after_whitespace_is_not_rstripped() -> None:
+    out = r("m", title="a" * 254 + " " + "b" * 10)
+    assert out.body["title"] == "a" * 254 + " …"
+    assert out.truncated is True
+
+
+GOLDEN_CASES: dict[str, dict[str, Any]] = {
+    "level_info": dict(message="Backup done", title="Nightly", level="info"),
+    "level_warn": dict(message="Disk at 91%", title="Nightly", level="warn"),
+    "level_error": dict(message="Backup failed", title="Nightly", level="error"),
+    "level_action": dict(message="Approve the change", title="Review", level="action"),
+    "link": dict(message="See page", link="HTTPS://Ha.Example/a?b=1", level="info"),
+    "title_cut": dict(message="m", title="a" * 254 + " " + "b" * 40, level="warn"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(GOLDEN_CASES))
+def test_golden_request_bodies(name: str, golden: Golden) -> None:
+    out = r(**GOLDEN_CASES[name])
+    RENDERED_SCHEMA.validate(out.body)
+    golden.check("request", f"{name}.json", serialize(out.body).decode("utf-8"))

@@ -16,6 +16,7 @@ TODO(#18): the tag is computed from the dedupe key by the caller; this module ta
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping
@@ -24,7 +25,7 @@ from typing import Any
 
 from ha_notice.payload import Notification
 
-__all__ = ["MARKER", "Rendered", "render", "serialize"]
+__all__ = ["MARKER", "Rendered", "message_sha256", "render", "serialize"]
 
 TITLE_MAX = 256
 MESSAGE_MAX_BYTES = 2000
@@ -33,7 +34,8 @@ ELLIPSIS = "…"
 
 _TAG = re.compile(r"awkit-[0-9a-f]{24}")
 _GROUP = re.compile(r"[A-Za-z0-9_-]{1,64}")
-_SCHEME = re.compile(r"(?i:https?)://")
+_SCHEME = re.compile(r"https?://", re.ASCII | re.IGNORECASE)
+MAX_CHARS_RANGE = (100, 2000)
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,13 @@ def _cut_message(message: str, max_chars: int) -> tuple[str, bool]:
     return head[:kept].rstrip() + MARKER, True
 
 
+def message_sha256(title: str | None, message: str) -> str:
+    """First 16 hex characters of the SHA-256 of the UTF-8 bytes of the sanitized title (empty
+    when absent), a LF and the sanitized message, before any cut, prefix or link."""
+    raw = f"{title or ''}\n{message}".encode()
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
 def _link(link: str) -> str:
     m = _SCHEME.match(link)
     if m is None:
@@ -89,8 +98,11 @@ def render(
 ) -> Rendered:
     """Build the notify request body. ``tag`` is ``awkit-`` plus 24 hex characters (TODO(#18):
     the caller derives it from the dedupe key); anything else is a ``ValueError``, as are a
-    ``default_group`` outside ``[A-Za-z0-9_-]{1,64}``, an unknown level and a link that is not
-    http or https: those are checked upstream and are programming errors here."""
+    ``max_chars`` outside 100 to 2000, a ``default_group`` outside
+    ``[A-Za-z0-9_-]{1,64}``, an unknown level and a link that is not http or https: those are
+    checked upstream and are programming errors here."""
+    if type(max_chars) is not int or not MAX_CHARS_RANGE[0] <= max_chars <= MAX_CHARS_RANGE[1]:
+        raise ValueError("max_chars is not an integer from 100 to 2000")
     if notification.level not in level_prefix:
         raise ValueError("unknown level")
     if tag is not None and _TAG.fullmatch(tag) is None:
