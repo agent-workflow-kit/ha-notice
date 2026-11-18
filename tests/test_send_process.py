@@ -40,6 +40,17 @@ class Gateway(RealGateway):
 
 sys.exit(main(None, None, Gateway()))
 """
+# After ``main`` returned (the result is printed and flushed) the process gets a SIGTERM before it
+# ends, as in the window of interpreter exit. The handler must still be ours: with the OS default
+# the process would die with 143 (-15 here), which tells a caller that nothing was sent.
+LATE_SIGNAL_WRAPPER = WRAPPER.replace(
+    "sys.exit(main(None, None, Gateway()))",
+    """code = main(None, None, Gateway())
+import signal
+for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+    os.kill(os.getpid(), number)
+sys.exit(code)""",
+)
 LIMIT_S = 60
 
 
@@ -265,3 +276,20 @@ def test_a_held_log_lock_delays_only_the_log_in_a_real_process(
     assert total - line_at >= 0.5  # the log step waited for the lock
     assert total < 10 + 3  # timeout plus 3 s
     assert err.decode().count(STATE_WARNING) == 1 and log_records(home) == []
+
+
+def test_a_signal_after_the_result_does_not_change_the_exit_code(
+    tmp_path: Path, home: Path
+) -> None:
+    with FakeHA(token=TOKEN) as ha:
+        argv = ["--config", write_config(tmp_path, ha), "--json", "send", "--message=hi"]
+        done = subprocess.run(
+            [sys.executable, "-c", LATE_SIGNAL_WRAPPER, *argv],
+            input=b"",
+            env=make_env(home),
+            capture_output=True,
+            timeout=LIMIT_S,
+            check=False,
+        )
+        assert done.returncode == 0 and json.loads(done.stdout)["outcome"] == "sent"
+        assert [r["outcome"] for r in log_records(home)] == ["sent"]

@@ -208,6 +208,11 @@ class FakeConnection:
         self.closed = True
 
 
+# The default home. It is never created: the state directory calls refuse it (a test that logs
+# passes ``private_home(tmp_path)``), so no test can make a directory outside its tmp tree.
+UNSET_HOME = "/nonexistent-fake-home"
+
+
 @dataclass
 class FakeGateway:
     """Implements ``ha_notice.gateway.Gateway`` with scripted behaviour."""
@@ -218,7 +223,7 @@ class FakeGateway:
     resolve_errors: dict[str, BaseException] = field(default_factory=dict)
     resolve_block: threading.Event | None = None
     resolve_delay: float = 0.0  # seconds the fake clock advances inside resolve()
-    home: str | HomeLookupError = "/nonexistent-fake-home"
+    home: str | HomeLookupError = UNSET_HOME
     user_id: int = field(default_factory=lambda: os.getuid())
     login: str | None = "fakeuser"
     tty_fds: set[int] = field(default_factory=set)
@@ -335,6 +340,8 @@ class FakeGateway:
     def open_state_dir(self, home: str) -> int:
         if self.state_error is not None:
             raise self.state_error
+        if home == UNSET_HOME:  # never touch the filesystem for the default home
+            raise StateDirError()
         return _OwnedBy(self.user_id).open_state_dir(home)
 
     def open_state_file(self, dir_fd: int, name: str, *, append: bool = False) -> int:

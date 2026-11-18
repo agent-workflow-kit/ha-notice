@@ -13,6 +13,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -307,6 +308,70 @@ def test_a_stalled_host_ends_at_the_deadline_with_outcome_unknown(
         [rec] = records(io)
         assert rec["outcome"] == "outcome_unknown" and 1000 <= rec["duration_ms"] < 4000
         assert err.splitlines()[-1].startswith("outcome_unknown:")
+
+
+def _one_second_config(tmp_path: Path, ha: FakeHA) -> str:
+    cfg = config(tmp_path, ha)
+    Path(cfg).write_text(Path(cfg).read_text().replace("timeout: 10s", "timeout: 1s"))
+    return cfg
+
+
+def test_a_byte_by_byte_response_ends_at_the_deadline_with_outcome_unknown(
+    tmp_path: Path, io: RealIO, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Every read succeeds within the socket timeout, so only the send deadline can end it.
+    with FakeHA(script=[Reply(trickle=0.2, body=b"[" + b" " * 200 + b"]")]) as ha:
+        started = time.monotonic()
+        cfg = _one_second_config(tmp_path, ha)
+        code, out, _, exited = run(capsys, io, cfg, ["--json", "send", "--message=a"])
+        assert code == 12 and exited and time.monotonic() - started < 1 + 3
+        assert json.loads(out)["error"]["code"] == "outcome_unknown"
+        assert [r["outcome"] for r in records(io)] == ["outcome_unknown"]
+
+
+def test_an_endless_100_continue_stream_ends_at_the_deadline_with_outcome_unknown(
+    tmp_path: Path, io: RealIO, capsys: pytest.CaptureFixture[str]
+) -> None:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    stop = threading.Event()
+
+    def serve() -> None:
+        try:
+            conn, _ = listener.accept()
+            conn.settimeout(5)
+            data = b""
+            while b"\r\n\r\n" not in data:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    return
+                data += chunk
+            while not stop.is_set():
+                conn.sendall(b"HTTP/1.1 100 Continue\r\n\r\n")
+                stop.wait(0.05)
+            conn.close()
+        except OSError:
+            pass
+
+    server = threading.Thread(target=serve, daemon=True)
+    server.start()
+    cfg = tmp_path / "c.yaml"
+    port = listener.getsockname()[1]
+    cfg.write_text(
+        f"base_url: http://127.0.0.1:{port}\nservice: {SERVICE}\ntimeout: 1s\n"
+        "allow_insecure_http: true\n",
+        encoding="utf-8",
+    )
+    try:
+        started = time.monotonic()
+        code, out, _, exited = run(capsys, io, str(cfg), ["--json", "send", "--message=a"])
+        assert code == 12 and exited and time.monotonic() - started < 1 + 3
+        assert json.loads(out)["error"]["code"] == "outcome_unknown"
+    finally:
+        stop.set()
+        listener.close()
+        server.join(10)
 
 
 def test_a_stalled_name_resolution_ends_at_the_deadline_and_writes_nothing(

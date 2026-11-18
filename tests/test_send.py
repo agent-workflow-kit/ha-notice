@@ -278,6 +278,22 @@ def test_response_table(rig: Rig, name: str) -> None:
     assert schema_errors("log", record) == []
 
 
+@pytest.mark.parametrize("name", [n for n, r in ROWS.items() if r.exit == 12])
+def test_response_table_with_a_dedupe_key(rig: Rig, name: str) -> None:
+    """With a tag ``upstream_error`` (and ``outcome_unknown``) is retryable, a retry replaces the
+    notification; every other cell, ``wrong_host_response`` after a 2xx included, is unchanged.
+    The log records ``tag_set``."""
+    row = ROWS[name]
+    rig.gw.default_script = row.script
+    argv = ["--json", "send", "--message=hi", "--dedupe-key=k"]
+    code, out, _ = rig.run(argv, config=rig.cfg(timeout=10))
+    body = error_of(out)
+    assert code == 12 and body["code"] == row.code and body["unknown_outcome"] is row.unknown
+    assert body["retryable"] is (True if row.code == "upstream_error" else row.retryable)
+    record = rig.records()[0]
+    assert record["tag_set"] is True and schema_errors("log", record) == []
+
+
 def test_400_carries_the_hint_and_404_names_base_url(rig: Rig) -> None:
     rig.gw.default_script = _row(400)
     body = error_of(rig.run(["--json", "send", "--message=hi"])[1])
@@ -385,7 +401,10 @@ def test_connect_and_io_timeouts_never_exceed_the_time_that_remains(rig: Rig) ->
 # --- credential, trust ------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value", [None, "", "  ", "has space", "tab\there", "é" * 3, "x" * 4097])
+@pytest.mark.parametrize(
+    "value",
+    [None, "", "  ", "has space", "tab\there", "é" * 3, "x" * 4097, "ab\r\ncd", "€", "日本"],
+)
 def test_a_bad_token_is_credential_invalid_with_the_name_only(rig: Rig, value: str | None) -> None:
     env = {} if value is None else {"HA_TOKEN": value}
     code, out, err = rig.run(["--json", "send", "--message=hi"], env=env)
@@ -395,7 +414,7 @@ def test_a_bad_token_is_credential_invalid_with_the_name_only(rig: Rig, value: s
     assert body["retryable"] is False and body["unknown_outcome"] is False
     assert rig.gw.connections == [] and rig.gw.resolve_calls == []
     if value:
-        assert value not in out + err
+        assert value not in out + err + rig.log_text()
     assert rig.records()[0]["code"] == "credential_invalid"
 
 
@@ -486,6 +505,54 @@ def test_https_and_dry_run_print_no_insecure_warning(rig: Rig) -> None:
     assert rig.run(["--dry-run", "send", "--message=hi"], config=config)[2].count("warning") == 0
 
 
+HTTP_CONFIG = "base_url: http://ha.example\nservice: s\nallow_insecure_http: true\n"
+
+
+def _slow_input_gateway(rig: Rig, leave: float) -> FakeGateway:
+    """A gateway whose input read ends with ``leave`` seconds of the 5 s deadline left."""
+
+    class Slow(FakeGateway):
+        def read_source(self, *a: Any, **k: Any) -> Any:
+            result = super().read_source(*a, **k)
+            self.advance(TIMEOUT_S - leave)
+            return result
+
+    return Slow(home=rig.gw.home, ca=rig.gw.ca, sources=rig.gw.sources)
+
+
+def test_no_insecure_warning_when_the_deadline_is_used_up_before_any_request(rig: Rig) -> None:
+    gw = _slow_input_gateway(rig, 0.0)
+    code, out, err = rig.run(
+        ["--json", "send", "--stdin-json"], config=rig.cfg(HTTP_CONFIG), gateway=gw
+    )
+    body = error_of(out)
+    assert code == 12 and body["code"] == "network_error" and body["details"]["timeout"] is True
+    assert gw.connections == [] and INSECURE_HTTP_WARNING not in err
+
+
+def test_a_millisecond_left_still_warns_and_caps_the_socket_timeouts(rig: Rig) -> None:
+    gw = _slow_input_gateway(rig, 0.001)
+    code, _, err = rig.run(["send", "--stdin-json"], config=rig.cfg(HTTP_CONFIG), gateway=gw)
+    assert code == 0 and err.splitlines()[0] == INSECURE_HTTP_WARNING
+    spec = gw.connections[0].spec
+    assert spec.io_timeout == 0.01 and spec.connect_timeout <= 0.01
+
+
+def test_a_429_retry_prints_the_insecure_warning_once_per_run(rig: Rig) -> None:
+    rig.gw.scripts.extend([ConnectionScript(status=429), ConnectionScript(status=429)])
+    config = rig.cfg(HTTP_CONFIG, timeout=10)
+    code, _, err = rig.run(["send", "--message=hi"], config=config)
+    assert code == 0 and len(rig.gw.connections) == 3
+    assert err.count(INSECURE_HTTP_WARNING) == 1
+
+
+def test_the_insecure_warning_text_is_in_the_docs_and_the_schema() -> None:
+    root = Path(__file__).resolve().parent.parent
+    assert INSECURE_HTTP_WARNING in (root / "docs/interface.md").read_text(encoding="utf-8")
+    schema = (root / "schemas/cli/send.json").read_text(encoding="utf-8")
+    assert INSECURE_HTTP_WARNING in schema
+
+
 def test_a_failed_http_request_still_warns_and_a_credential_failure_does_not(rig: Rig) -> None:
     config = rig.cfg("base_url: http://ha.example\nservice: s\nallow_insecure_http: true\n")
     rig.gw.default_script = _row(401)
@@ -509,6 +576,15 @@ def test_a_refusal_is_logged_with_nulls(rig: Rig, golden: Golden) -> None:
     code, out, _ = rig.run(["--json", "send", "--stdin-json"])
     assert code == 20 and error_of(out)["reason"] == "empty_message"
     golden.check("log", "send-refused.jsonl", rig.log_text(), schema="log")
+
+
+def test_a_refusal_logs_null_level_even_when_a_valid_level_was_read(rig: Rig) -> None:
+    rig.gw.sources[0] = b'{"message":"tts","level":"warn"}'
+    code, out, _ = rig.run(["--json", "send", "--stdin-json"])
+    assert code == 20 and error_of(out)["reason"] == "command_keyword"
+    (rec,) = rig.records()
+    for key in ("level", "bytes", "truncated", "message_sha256", "dedupe_key_sha256", "tag_set"):
+        assert rec[key] is None, key
 
 
 def test_an_input_timeout_is_logged_as_failed_unavailable(rig: Rig, golden: Golden) -> None:
@@ -744,6 +820,65 @@ def test_a_signal_during_the_connect_phase_is_network_error(
     assert rig.gw.connections[0].bytes_written == 0
 
 
+def _hook_before_write(
+    monkeypatch: pytest.MonkeyPatch, around: Callable[[Callable[[], None]], None]
+) -> list[deadline.WritingGate]:
+    """Make the worker call ``around(enter_writing)`` where it would enter ``writing``. Returns
+    the gates the send creates."""
+    gates: list[deadline.WritingGate] = []
+
+    class Spy(deadline.WritingGate):
+        def __init__(self) -> None:
+            super().__init__()
+            gates.append(self)
+
+    real = send_module.send_once
+
+    def hooked(gateway: Any, target: Any, service: str, body: bytes, *, before_write: Any) -> Any:
+        return real(gateway, target, service, body, before_write=lambda: around(before_write))
+
+    monkeypatch.setattr(send_module, "WritingGate", Spy)
+    monkeypatch.setattr(send_module, "send_once", hooked)
+    return gates
+
+
+def test_a_signal_just_after_the_gate_enters_writing_is_outcome_unknown(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, release: threading.Event
+) -> None:
+    def enter_then_signal(enter_writing: Callable[[], None]) -> None:
+        enter_writing()
+        rig.gw.deliver_signal(signal.SIGTERM)  # the gate is writing, no byte written yet
+
+    _hook_before_write(monkeypatch, enter_then_signal)
+    rig.gw.default_script = ConnectionScript(stall_after_first_byte=release)
+    code, out, _ = rig.run(["--json", "send", "--message=hi"])
+    body = error_of(out)
+    assert code == 12 and rig.exited and rig.gw.exits == [12]
+    assert body["code"] == "outcome_unknown" and body["unknown_outcome"] is True
+    assert len(rig.gw.connections) == 1
+    assert [r["outcome"] for r in rig.records()] == ["outcome_unknown"]
+
+
+def test_a_signal_just_before_the_gate_enters_writing_is_network_error_and_writes_nothing(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def signal_then_try(enter_writing: Callable[[], None]) -> None:
+        rig.gw.deliver_signal(signal.SIGTERM)
+        for _ in range(2000):  # until the main thread has decided (it polls every 100 ms)
+            if gates[0].abandoned():
+                break
+            threading.Event().wait(0.005)
+        enter_writing()  # refused: the gate was abandoned while idle
+
+    gates = _hook_before_write(monkeypatch, signal_then_try)
+    code, out, _ = rig.run(["--json", "send", "--message=hi"])
+    body = error_of(out)
+    assert code == 12 and rig.exited
+    assert body["code"] == "network_error" and body["unknown_outcome"] is False
+    assert all(c.requests == [] and c.bytes_written == 0 for c in rig.gw.connections)
+    assert [r["outcome"] for r in rig.records()] == ["failed"]
+
+
 def test_a_signal_before_the_worker_starts_is_128_plus_n_and_sends_nothing(rig: Rig) -> None:
     class Sig(FakeGateway):
         def ca_candidates(self) -> CaCandidates:  # runs in make_target, before the worker
@@ -752,6 +887,42 @@ def test_a_signal_before_the_worker_starts_is_128_plus_n_and_sends_nothing(rig: 
 
     gw = Sig(home=rig.gw.home, ca=rig.gw.ca)
     assert rig.run(["--json", "send", "--message=hi"], gateway=gw) == (129, "", "")
+    assert gw.connections == [] and rig.records() == []
+
+
+def test_a_signal_during_render_stops_a_dry_run_with_no_output(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = send_module.serialize
+
+    def serialize_then_signal(body: Any) -> bytes:
+        data = real(body)
+        rig.gw.deliver_signal(signal.SIGTERM)  # after the render, before the dry run prints
+        return data
+
+    monkeypatch.setattr(send_module, "serialize", serialize_then_signal)
+    code, out, _ = rig.run(["--json", "--verbose", "--dry-run", "send", "--message=hi"])
+    assert (code, out) == (143, "") and rig.records() == []
+
+
+def test_a_signal_while_the_token_is_read_is_128_plus_n_and_not_logged(rig: Rig) -> None:
+    class Env(dict[str, str]):
+        def get(self, key: str, default: Any = None) -> Any:
+            rig.gw.deliver_signal(signal.SIGTERM)
+            return "has space"  # a bad token: the credential_invalid branch
+
+    assert rig.run(["--json", "send", "--message=hi"], env=Env()) == (143, "", "")
+    assert rig.gw.connections == [] and rig.records() == []
+
+
+def test_a_signal_while_the_trust_is_loaded_is_128_plus_n_and_not_logged(rig: Rig) -> None:
+    class Sig(FakeGateway):
+        def ca_candidates(self) -> CaCandidates:
+            self.deliver_signal(signal.SIGINT)
+            return CaCandidates("", "", ())  # no usable trust: the TrustError branch
+
+    gw = Sig(home=rig.gw.home)
+    assert rig.run(["--json", "send", "--message=hi"], gateway=gw) == (130, "", "")
     assert gw.connections == [] and rig.records() == []
 
 
@@ -840,9 +1011,76 @@ def test_progress_writing_follows_the_gate_state_of_the_verdict(
 
     monkeypatch.setattr(deadline.Verdict, "error", broken)
     rig.gw.default_script = script
-    code, out, _ = rig.run(["--json", "send", "--message=hi"])
+    code, out, err = rig.run(["--json", "send", "--message=hi"])
     body = error_of(out)
     assert code == 1 and body["code"] == "internal" and body["unknown_outcome"] is unknown
+    assert out.count("\n") == 1 and err.count("\n") == 1  # never a second envelope
+    if unknown:  # the interface logs an exit 1 after writing as outcome_unknown / internal
+        assert_logged_internal(rig)
+    else:
+        assert rig.records() == []
+
+
+def assert_logged_internal(rig: Rig) -> None:
+    rec = rig.records()
+    assert len(rec) == 1 and schema_errors("log", rec[0]) == []
+    assert (rec[0]["exit"], rec[0]["outcome"], rec[0]["code"]) == (1, "outcome_unknown", "internal")
+    assert rec[0]["reason"] is None and rec[0]["http_status"] is None
+    assert rec[0]["level"] == "info" and rec[0]["tag_set"] is False
+
+
+def test_an_exception_from_the_deadline_after_writing_is_exit_1_logged_once(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def writing_then_raise(gateway: Any, attempt: Any, **kw: Any) -> Any:
+        kw["gate"].enter_writing()
+        raise RuntimeError("after the gate entered writing")
+
+    monkeypatch.setattr(send_module, "run_with_deadline", writing_then_raise)
+    code, out, err = rig.run(["--json", "send", "--message=hi"])
+    body = error_of(out)
+    assert code == 1 and body["unknown_outcome"] is True and out.count("\n") == 1
+    assert "after the gate" not in out + err
+    assert_logged_internal(rig)
+
+
+def test_an_exception_from_the_deadline_while_idle_is_not_logged(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def raise_idle(gateway: Any, attempt: Any, **kw: Any) -> Any:
+        raise RuntimeError("idle")
+
+    monkeypatch.setattr(send_module, "run_with_deadline", raise_idle)
+    code, out, _ = rig.run(["--json", "send", "--message=hi"])
+    assert code == 1 and error_of(out)["unknown_outcome"] is False and rig.records() == []
+
+
+@pytest.mark.parametrize(
+    ("script", "unknown"),
+    [(_row(401), True), (ConnectionScript(connect_error=ConnectionRefusedError(111, "x")), False)],
+)
+def test_conclude_falls_back_to_internal_when_nothing_was_printed(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, script: ConnectionScript, unknown: bool
+) -> None:
+    real = send_module.emit_error
+    calls: list[int] = []
+
+    def flaky(json_mode: bool, error: Any) -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("printing failed before anything was written")
+        real(json_mode, error)
+
+    monkeypatch.setattr(send_module, "emit_error", flaky)
+    rig.gw.default_script = script
+    code, out, _ = rig.run(["--json", "send", "--message=hi"])
+    body = error_of(out)
+    assert code == 1 and body["code"] == "internal" and out.count("\n") == 1
+    assert body["unknown_outcome"] is unknown
+    if unknown:
+        assert_logged_internal(rig)
+    else:
+        assert rig.records() == []
 
 
 def test_one_envelope_per_run_when_printing_fails_after_the_result(

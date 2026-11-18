@@ -446,8 +446,9 @@ def _run(args: list[str], environment: Mapping[str, str], gw: Gateway) -> int:
         return fail(wants_json(args), "internal")
     # Installed after parsing: a usage error touches no gateway method. A signal during the parse
     # has the OS default action (SIGINT: KeyboardInterrupt, mapped in ``main``). The handlers stay
-    # (flag-only) until after the flush, so a late signal cannot kill the process after the result.
-    with install(gw, inv.signals):
+    # (flag-only) for the rest of the process, never restored (``keep``): a late signal, also one
+    # after the flush and before the interpreter exits, cannot kill the process after the result.
+    with install(gw, inv.signals, keep=True):
         try:
             inv.signals.check()
             code = HANDLERS[inv.command](inv)

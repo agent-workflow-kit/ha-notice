@@ -242,16 +242,43 @@ def _is_http(config: Config) -> bool:
     return base is not None and base.scheme == "http"
 
 
+def _internal_after_writing(inv: Invocation, config: Config, plan: Plan, fixed_at: float) -> int:
+    """Exit 1 once the gate reached ``writing``: the one envelope (``unknown_outcome`` true) and,
+    best effort, the log record (outcome ``outcome_unknown``, code ``internal``), in that order.
+    Nothing is printed twice: what was printed already decides the code and is not logged here."""
+    done = emitted_exit()
+    if done is not None:
+        return done
+    code = fail(inv.json, "internal", after_writing=True)
+    flush_streams()
+    try:
+        facts = _facts(
+            inv,
+            plan,
+            exit_code=code,
+            unknown_outcome=True,
+            code="internal",
+            reason=None,
+            duration_ms=_ms(plan.started, fixed_at),
+            http_status=None,
+        )
+        _log(inv, config, facts)
+    except Exception:  # noqa: BLE001 - the log step is best effort
+        pass
+    return code
+
+
 def _conclude(inv: Invocation, config: Config, plan: Plan, result: _Result) -> int:
     """Report ``result`` and end the run. A failure while reporting never prints a second
     envelope: what was printed already decides the code."""
     try:
         code = _present(inv, config, plan, result)
     except Exception:  # noqa: BLE001 - nothing of it is printed
-        done = emitted_exit()
-        code = (
-            done if done is not None else fail(inv.json, "internal", after_writing=result.writing)
-        )
+        if result.writing:
+            code = _internal_after_writing(inv, config, plan, result.fixed_at)
+        else:
+            done = emitted_exit()
+            code = done if done is not None else fail(inv.json, "internal")
     if result.verdict is None:
         return code
     # The process ends here when the worker may still run (a deadline or a stop); the streams
@@ -287,13 +314,14 @@ def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
     def attempt(before_write: Callable[[], None]) -> RawResponse:
         return send_once(gateway, target, service, plan.body, before_write=before_write)
 
-    if _is_http(config):  # one line on every real request; --quiet does not suppress it
-        write_text(sys.stderr, INSECURE_HTTP_WARNING + "\n")
-
     # Step 6. The last checkpoint is immediately before the worker starts; from here on a signal
     # is the stop path (the gate decides, as at the deadline).
     gate = WritingGate()
     inv.signals.check()
+    # One line per run, before the first request; --quiet does not suppress it. Not printed when
+    # no request is made (the deadline is already used up: ``run_with_deadline`` starts no worker).
+    if _is_http(config) and deadline - gateway.monotonic() > 0:
+        write_text(sys.stderr, INSECURE_HTTP_WARNING + "\n")
     try:
         verdict = run_with_deadline(
             gateway,
@@ -307,11 +335,14 @@ def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
         # For example "can't start new thread": exit 1 ``internal error`` (cli prints it), with
         # unknown_outcome only if the gate reached writing. Close the gate so that no worker that
         # did start can write after this.
-        inv.progress.writing = gate.state() is Gate.WRITING
+        writing = gate.state() is Gate.WRITING
+        inv.progress.writing = writing
         try:
             gate.settle()
         except Exception:  # noqa: BLE001
             pass
+        if writing:  # exit 1 with unknown_outcome: printed and logged here (best effort)
+            return _internal_after_writing(inv, config, plan, gateway.monotonic())
         raise
     fixed_at = gateway.monotonic()
     writing = verdict.gate is Gate.WRITING
@@ -320,7 +351,14 @@ def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
     if isinstance(outcome, Success):
         result = _Result(None, outcome.http_status, writing, fixed_at, send_started, verdict)
     else:
-        error = verdict.error(tag_sent=plan.tag_set)
+        try:
+            error = verdict.error(tag_sent=plan.tag_set)
+        except Exception:
+            if not writing:
+                raise  # exit 1, not logged: cli prints the fixed message
+            code = _internal_after_writing(inv, config, plan, fixed_at)
+            flush_streams()
+            return finish(gateway, verdict, code)
         result = _Result(error, None, writing, fixed_at, send_started, verdict)
     return _conclude(inv, config, plan, result)
 

@@ -2,7 +2,8 @@
 
 The client is the real gateway from issue #3 wherever it can show the behavior; the response
 headers are not part of the gateway's surface, so those checks use ``http.client`` directly.
-The response mapping, retries and deadline belong to later issues; the TODOs name them.
+The response mapping, retries and deadline are tested in tests/test_response.py, test_retry.py,
+test_deadline.py and the send-level tests (tests/test_send_socket.py).
 """
 
 from __future__ import annotations
@@ -263,7 +264,6 @@ def test_a_trickled_response_outlasts_the_io_timeout_but_never_stalls_one_read(h
     assert (status, body) == (200, b"[]")
     assert elapsed > 0.01 * (total - 1) * 0.8
     assert elapsed > 0.4  # longer than one io_timeout, yet no single read timed out
-    # TODO(#25): the send deadline ends a trickle that outlasts `timeout`.
 
 
 def test_a_trickle_with_a_gap_longer_than_the_io_timeout_times_out(ha: FakeHA) -> None:
@@ -344,7 +344,6 @@ def test_a_redirect_is_served_but_the_second_server_sees_nothing() -> None:
         assert status == 307
         assert (response.status, response.getheader("Location")) == (302, target)
         assert (other.connections, len(other.requests)) == (1, 1)  # neither client followed it
-    # TODO(#23): a 3xx maps to wrong_host_response and nothing reads the Location.
 
 
 def test_the_token_reaches_only_the_server_it_was_sent_to() -> None:
@@ -383,7 +382,6 @@ def test_a_stalled_resolver_holds_the_connect_and_no_request_reaches_the_server(
     thread.join(10)
     assert result == [(200, b"[]")]
     assert gw.calls == [("127.0.0.1", ha.port)]
-    # TODO(#25): the deadline ends a send whose name resolution never returns.
 
 
 # --- TLS ------------------------------------------------------------------------------------
@@ -403,7 +401,6 @@ def test_https_without_trusting_the_certificate_fails_verification(tls_ha: FakeH
     with pytest.raises(ssl.SSLCertVerificationError):
         exchange(tls_ha, tls=empty_trust)
     assert tls_ha.requests == []  # the token is never sent after a failed handshake
-    # TODO(#22): trust selection decides which files are in the context; ca_file adds this one.
 
 
 def test_a_certificate_for_another_name_fails_verification(

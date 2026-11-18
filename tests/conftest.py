@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import signal
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -47,3 +48,15 @@ def other_cert(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Path,
         yield make_self_signed_cert(directory, sans=("DNS:elsewhere.invalid",), name="other")
     finally:
         shutil.rmtree(directory, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def _keep_signal_handlers() -> Iterator[None]:
+    """``cli.main`` leaves its flag-only handlers installed (the process is ending); in-process
+    tests with the real gateway must not leave them in the pytest process."""
+    saved = {n: signal.getsignal(n) for n in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    try:
+        yield
+    finally:
+        for number, handler in saved.items():
+            signal.signal(number, handler)

@@ -157,7 +157,7 @@ def test_a_signal_during_a_stalled_input_is_128_plus_n(
     fake.schedule_signal(fake.now + 2.5, signum)  # arrives in a wait slice of the read
     code, out, err = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
     assert (code, out, err) == (128 + signum, "", "")
-    assert fake.handlers == {} and fake.restore_count == 1
+    assert set(fake.handlers) == set(SIGNALS) and fake.restore_count == 0  # kept to the end
     assert fake.exits == [] and fake.connections == []
 
 
@@ -260,15 +260,15 @@ def test_a_signal_before_the_send_touches_no_state_directory_or_log(
     assert code == 143 and touched == [] and fake.exits == []
 
 
-def test_without_a_signal_the_handlers_are_restored_too(
+def test_without_a_signal_the_handlers_are_kept_too(
     capsys: pytest.CaptureFixture[str], cfg: str
 ) -> None:
     fake = FakeGateway(sources={0: b'{"message":"hi"}'})
     code, _, _ = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
-    assert code == 0 and fake.install_count == 1 and fake.restore_count == 1
+    assert code == 0 and fake.install_count == 1 and fake.restore_count == 0
 
 
-def test_handlers_are_restored_after_an_internal_error(
+def test_handlers_are_kept_after_an_internal_error(
     capsys: pytest.CaptureFixture[str], cfg: str
 ) -> None:
     class Boom(FakeGateway):
@@ -278,7 +278,7 @@ def test_handlers_are_restored_after_an_internal_error(
     fake = Boom()
     code, out, _ = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
     assert code == 1 and "boom" not in out
-    assert fake.restore_count == 1
+    assert fake.restore_count == 0 and set(fake.handlers) == set(SIGNALS)
 
 
 def test_keyboard_interrupt_is_130_and_prints_nothing(
@@ -291,7 +291,7 @@ def test_keyboard_interrupt_is_130_and_prints_nothing(
     fake = Interrupted()
     code, out, err = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
     assert (code, out, err) == (130, "", "")
-    assert fake.restore_count == 1
+    assert fake.restore_count == 0
 
 
 def test_system_exit_is_an_internal_error_without_its_text(
@@ -326,7 +326,7 @@ def test_an_unexpected_exception_after_a_signal_is_still_the_signal(
         monkeypatch.setattr(f"ha_notice.send.{phase}", fail_after_signal)
     code, out, err = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
     assert (code, out, err) == (143, "", "")
-    assert fake.handlers == {}
+    assert set(fake.handlers) == set(SIGNALS)
 
 
 def test_a_system_exit_while_parsing_is_an_internal_error(
@@ -355,7 +355,7 @@ def test_handlers_stay_installed_through_the_final_flush(
     code, out, _ = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
     assert code == 0 and json.loads(out)["outcome"] == "dry_run"
     assert seen[0] is True  # the flag-only handler was still installed at the flush
-    assert fake.handlers == {} and fake.restore_count == 1
+    assert fake.restore_count == 0  # kept: the flag-only handler outlives the flush
 
 
 def test_a_keyboard_interrupt_in_the_final_flush_keeps_the_exit_code(
@@ -565,3 +565,21 @@ def test_a_real_process_without_a_signal_still_works(tmp_path: Path) -> None:
             if pipe is not None:
                 pipe.close()
     assert proc.returncode == 0 and json.loads(out)["outcome"] == "dry_run"
+
+
+def test_a_signal_after_the_result_was_reported_cannot_change_the_exit_code(
+    capsys: pytest.CaptureFixture[str], cfg: str
+) -> None:
+    fake = FakeGateway(sources={0: b'{"message":"hi"}'})
+    code, out, _ = _run(capsys, ["--json", "--config", cfg, "send", "--dry-run"], fake)
+    assert code == 0 and json.loads(out)["outcome"] == "dry_run"
+    # The window between the last flush and the end of the process: the handler is still ours.
+    assert fake.deliver_signal(signal.SIGTERM) is True
+    assert fake.deliver_signal(signal.SIGINT) is True
+
+
+def test_install_with_keep_never_restores() -> None:
+    fake = FakeGateway()
+    with pytest.raises(RuntimeError), install(fake, SignalState(), keep=True):
+        raise RuntimeError("x")
+    assert set(fake.handlers) == set(SIGNALS) and fake.restore_count == 0

@@ -16,10 +16,11 @@ the main thread when it looks at the flag:
   follows docs/interface.md (Deadline), log step included; ``send.deliver`` passes
   ``SignalState.stopped`` there.
 
-Handlers are installed and restored through the gateway (``install``) and are restored on every
-path; ``cli`` keeps them (flag-only) until after the final stream flush, so a late signal cannot
-kill the process after the result was reported. The residual is interpreter shutdown after
-``main`` returns. The default action of a signal that arrives before ``install`` is the OS's (143
+Handlers are installed through the gateway (``install``) and are restored on every path, except
+for ``cli``, which keeps them (flag-only) for the rest of the process: a late signal, also one in
+the window between the final stream flush and the interpreter's exit, cannot kill the process
+after the result was reported (the default SIGTERM action would make it 143, which says "nothing
+was sent"). The default action of a signal that arrives before ``install`` is the OS's (143
 for SIGTERM from a shell); a SIGINT then reaches ``cli.main`` as ``KeyboardInterrupt`` and is
 mapped to 130.
 """
@@ -92,9 +93,18 @@ class SignalState:
 
 
 @contextmanager
-def install(gateway: Gateway, state: SignalState) -> Iterator[SignalState]:
-    """Install the handlers through the gateway for the duration, restoring them on every path."""
+def install(gateway: Gateway, state: SignalState, *, keep: bool = False) -> Iterator[SignalState]:
+    """Install the handlers through the gateway for the duration.
+
+    By default they are restored on every path. With ``keep`` they are never restored: the
+    process is ending (``cli.main``), and a restore would give a signal that arrives after the
+    result was reported, in the window up to the interpreter's exit, the default action (143 for
+    SIGTERM), which tells a caller that nothing was sent. The flag-only handler leaves the exit
+    code alone."""
     restore = gateway.install_signal_handlers(HANDLED_SIGNALS, state.handler)
+    if keep:
+        yield state
+        return
     try:
         yield state
     finally:
