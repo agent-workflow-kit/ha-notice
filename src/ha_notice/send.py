@@ -234,7 +234,6 @@ def _present(inv: Invocation, config: Config, plan: Plan, result: _Result) -> in
         code = error.exit_code
         facts = _error_facts(inv, plan, result, error)
     _log(inv, config, facts)
-    flush_streams()
     return code
 
 

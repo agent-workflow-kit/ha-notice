@@ -374,6 +374,14 @@ def test_an_exception_from_the_first_request_call_is_outcome_unknown(rig: Rig) -
     assert code == 12 and error_of(out)["code"] == "outcome_unknown"
 
 
+def test_connect_and_io_timeouts_never_exceed_the_time_that_remains(rig: Rig) -> None:
+    rig.run(["send", "--message=hi"], config=rig.cfg(BASE + "connect_timeout: 20s\n", timeout=7))
+    spec = rig.gw.connections[0].spec
+    assert spec.connect_timeout == 7.0 and spec.io_timeout == 7.0
+    rig.run(["send", "--message=hi"], config=rig.cfg(BASE + "connect_timeout: 2s\n", timeout=7))
+    assert rig.gw.connections[1].spec.connect_timeout == 2.0
+
+
 # --- credential, trust ------------------------------------------------------------------------
 
 
@@ -639,7 +647,7 @@ def test_log_rotation_still_works_from_a_send(rig: Rig) -> None:
 
 
 def _when(
-    ready: Callable[[], bool], action: Callable[[], None], *, within: float = 8.0
+    ready: Callable[[], bool], action: Callable[[], object], *, within: float = 8.0
 ) -> threading.Thread:
     """A test-owned thread that runs ``action`` once ``ready`` holds (bounded)."""
 
@@ -818,6 +826,23 @@ def test_a_failure_while_idle_that_is_not_a_network_error_is_exit_1_not_logged(r
     rig.gw.default_script = ConnectionScript(connect_error=ValueError("x"))
     code, out, _ = rig.run(["--json", "send", "--message=hi"])
     assert code == 1 and error_of(out)["unknown_outcome"] is False and rig.records() == []
+
+
+@pytest.mark.parametrize(
+    ("script", "unknown"),
+    [(_row(401), True), (ConnectionScript(connect_error=ConnectionRefusedError(111, "x")), False)],
+)
+def test_progress_writing_follows_the_gate_state_of_the_verdict(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, script: ConnectionScript, unknown: bool
+) -> None:
+    def broken(self: Any, *, tag_sent: bool) -> Any:
+        raise ValueError("a bug between the verdict and the report")
+
+    monkeypatch.setattr(deadline.Verdict, "error", broken)
+    rig.gw.default_script = script
+    code, out, _ = rig.run(["--json", "send", "--message=hi"])
+    body = error_of(out)
+    assert code == 1 and body["code"] == "internal" and body["unknown_outcome"] is unknown
 
 
 def test_one_envelope_per_run_when_printing_fails_after_the_result(
