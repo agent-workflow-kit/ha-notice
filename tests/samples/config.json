@@ -1,0 +1,303 @@
+{
+  "valid": {
+    "empty": {},
+    "full": {
+      "enabled": true,
+      "base_url": "https://homeassistant.example:8123/prefix/",
+      "service": "mobile_app_phone",
+      "token_env": "HA_TOKEN",
+      "allow_insecure_http": false,
+      "ca_file": "/etc/ssl/ca.pem",
+      "link_hosts": [
+        "example.org"
+      ],
+      "level_prefix": {
+        "info": "",
+        "warn": "WARN:"
+      },
+      "default_group": "awkit",
+      "max_chars": 1000,
+      "timeout": "10s",
+      "connect_timeout": 3,
+      "log": true
+    },
+    "http_with_opt_in": {
+      "base_url": "http://ha.local:8123",
+      "allow_insecure_http": true
+    },
+    "durations": {
+      "timeout": "500ms",
+      "connect_timeout": 1.5
+    }
+  },
+  "invalid": {
+    "token_env_trailing_lf": {
+      "instance": {
+        "token_env": "HA_TOKEN\n"
+      },
+      "path": [
+        "token_env"
+      ]
+    },
+    "token_env_not_ha": {
+      "instance": {
+        "token_env": "TOKEN"
+      },
+      "path": [
+        "token_env"
+      ]
+    },
+    "token_env_lowercase": {
+      "instance": {
+        "token_env": "HA_token"
+      },
+      "path": [
+        "token_env"
+      ]
+    },
+    "default_group_trailing_lf": {
+      "instance": {
+        "default_group": "awkit\n"
+      },
+      "path": [
+        "default_group"
+      ]
+    },
+    "default_group_space": {
+      "instance": {
+        "default_group": "a b"
+      },
+      "path": [
+        "default_group"
+      ]
+    },
+    "default_group_empty": {
+      "instance": {
+        "default_group": ""
+      },
+      "path": [
+        "default_group"
+      ]
+    },
+    "service_trailing_lf": {
+      "instance": {
+        "service": "mobile_app_x\n"
+      },
+      "path": [
+        "service"
+      ]
+    },
+    "service_uppercase": {
+      "instance": {
+        "service": "Mobile"
+      },
+      "path": [
+        "service"
+      ]
+    },
+    "base_url_ftp": {
+      "instance": {
+        "base_url": "ftp://ha.example"
+      },
+      "path": [
+        "base_url"
+      ]
+    },
+    "base_url_trailing_lf": {
+      "instance": {
+        "base_url": "https://ha.example\n"
+      },
+      "path": [
+        "base_url"
+      ]
+    },
+    "base_url_userinfo": {
+      "instance": {
+        "base_url": "https://u:p@ha.example"
+      },
+      "path": [
+        "base_url"
+      ]
+    },
+    "base_url_query": {
+      "instance": {
+        "base_url": "https://ha.example/?a=b"
+      },
+      "path": [
+        "base_url"
+      ]
+    },
+    "base_url_dot_segment": {
+      "instance": {
+        "base_url": "https://ha.example/a/../b"
+      },
+      "path": [
+        "base_url"
+      ]
+    },
+    "http_without_opt_in": {
+      "instance": {
+        "base_url": "http://ha.example"
+      },
+      "path": [
+        "base_url"
+      ]
+    },
+    "ca_file_relative": {
+      "instance": {
+        "ca_file": "ca.pem"
+      },
+      "path": [
+        "ca_file"
+      ]
+    },
+    "ca_file_tilde": {
+      "instance": {
+        "ca_file": "~/ca.pem"
+      },
+      "path": [
+        "ca_file"
+      ]
+    },
+    "link_hosts_single_label": {
+      "instance": {
+        "link_hosts": [
+          "com"
+        ]
+      },
+      "path": [
+        "link_hosts",
+        0
+      ]
+    },
+    "link_hosts_empty": {
+      "instance": {
+        "link_hosts": []
+      },
+      "path": [
+        "link_hosts"
+      ]
+    },
+    "link_hosts_leading_dot": {
+      "instance": {
+        "link_hosts": [
+          ".example.com"
+        ]
+      },
+      "path": [
+        "link_hosts",
+        0
+      ]
+    },
+    "level_prefix_too_long": {
+      "instance": {
+        "level_prefix": {
+          "info": "xxxxxxxxxxxxxxxxx"
+        }
+      },
+      "path": [
+        "level_prefix",
+        "info"
+      ]
+    },
+    "level_prefix_newline": {
+      "instance": {
+        "level_prefix": {
+          "warn": "A\nB"
+        }
+      },
+      "path": [
+        "level_prefix",
+        "warn"
+      ]
+    },
+    "level_prefix_unknown_level": {
+      "instance": {
+        "level_prefix": {
+          "fatal": "x"
+        }
+      },
+      "path": [
+        "level_prefix"
+      ]
+    },
+    "max_chars_low": {
+      "instance": {
+        "max_chars": 99
+      },
+      "path": [
+        "max_chars"
+      ]
+    },
+    "max_chars_high": {
+      "instance": {
+        "max_chars": 2001
+      },
+      "path": [
+        "max_chars"
+      ]
+    },
+    "max_chars_string": {
+      "instance": {
+        "max_chars": "1000"
+      },
+      "path": [
+        "max_chars"
+      ]
+    },
+    "timeout_bad_unit": {
+      "instance": {
+        "timeout": "1h"
+      },
+      "path": [
+        "timeout"
+      ]
+    },
+    "timeout_trailing_lf": {
+      "instance": {
+        "timeout": "10s\n"
+      },
+      "path": [
+        "timeout"
+      ]
+    },
+    "timeout_negative": {
+      "instance": {
+        "timeout": -1
+      },
+      "path": [
+        "timeout"
+      ]
+    },
+    "timeout_bool": {
+      "instance": {
+        "timeout": true
+      },
+      "path": [
+        "timeout"
+      ]
+    },
+    "enabled_string": {
+      "instance": {
+        "enabled": "no"
+      },
+      "path": [
+        "enabled"
+      ]
+    },
+    "log_string": {
+      "instance": {
+        "log": "yes"
+      },
+      "path": [
+        "log"
+      ]
+    },
+    "unknown_key": {
+      "instance": {
+        "token": "secret"
+      },
+      "path": []
+    }
+  }
+}

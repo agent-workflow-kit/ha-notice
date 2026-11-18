@@ -19,6 +19,8 @@ ha-notice is one of three channel notifiers with the same contract (`slack-notic
 | Pydantic (config validation) | library | none | Required by the design guide for config. Errors are converted to messages from `loc` and `type` only, because the default message contains the input value. Added in stage 1 (config). |
 | PyYAML (config parser) | library | none | The design guide mandates YAML config; `yaml.safe_load` with a loader subclass that rejects duplicate keys and restricts the implicit resolvers (`no`, `off`, `010`, `1:30`, `0x10` stay strings), files opened with `O_NONBLOCK` and capped at 64 KiB, YAML errors never printed. Added in stage 1 with Pydantic. |
 
+| `jsonschema` (development only) | test library | none | Validates the samples, the example config and golden outputs against `schemas/` (draft 2020-12, local cross-file `$ref`s) in `tests/harness.py`. Never imported by `src/`, so the installed tool has no runtime dependency on it. PyYAML is also a development dependency from this stage (it reads `config.example.yaml` in the schema test) and becomes a runtime dependency in stage 1 (row above); `types-pyyaml` is its type stubs. CI's `schemas` job separately runs `check-jsonschema`, which uses the same library. |
+
 No tool dependencies: ha-notice composes nothing.
 
 ## Decisions
@@ -96,6 +98,7 @@ No stored objects. The log lock is the only lock. Errors use the envelope in [Er
 
 - Process tests call `cli.main(argv, env, gateway)` in-process with a fake gateway (name resolution, monotonic clock, home directory and uid, input reading, state-directory hooks, CA path candidates, the connection script); no test-only environment seam is allowed. A few real-socket tests stay: a local HTTPS server with a self-signed certificate and `ca_file`, and a plain-HTTP server with `allow_insecure_http`.
 - All HTTP goes through `gateway.py`; a fake Home Assistant server returns each row of [Home Assistant edge](interface.md#home-assistant-edge), including slow responses, a stall in name resolution, a response that trickles byte by byte, a connection drop after the request and a redirect (a second server must see zero requests); a fake proxy and a fake CA in `SSL_CERT_FILE` must be ignored.
+- The harness is `tests/harness.py` (schema loading and validation, `Golden` compare and update) with the `golden` fixture and `--update-golden` option in `tests/conftest.py`: goldens live in `tests/golden/{output,request,log}/`, are compared as exact text, and are rewritten only by `pytest --update-golden`, which is refused when `CI` is set. Schema samples are in `tests/samples/<schema>.json`; each negative sample names the location where it must fail.
 - Golden files for `--json` output, request bodies and the shared hash and serialization (levels, tags, links, truncation, the `data` allowlist), schema tests with positive and negative samples, a sanitizer table test, a link table test, a table test of command keywords and their near misses, and a test that the token appears in no argv, URL, output, log or error and is sent to no other host.
 - `live` tests (never in CI) send marked notifications to the user's own service; the still-to-verify items become assertions when run.
 

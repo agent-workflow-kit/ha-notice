@@ -71,7 +71,7 @@ def validator(name: str) -> Draft202012Validator:
     return Draft202012Validator(load_schema(name), registry=_registry())
 
 
-def schema_errors(name: str, instance: object) -> list[ValidationError]:
+def schema_errors(name: str, instance: Any) -> list[ValidationError]:
     return list(validator(name).iter_errors(instance))
 
 

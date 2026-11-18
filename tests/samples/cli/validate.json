@@ -1,0 +1,191 @@
+{
+  "valid": {
+    "ok": {
+      "ok": true,
+      "enabled": true,
+      "checks": [
+        {
+          "name": "config",
+          "ok": true,
+          "message": "m"
+        },
+        {
+          "name": "credential",
+          "ok": true,
+          "message": "m"
+        }
+      ]
+    },
+    "probe": {
+      "ok": true,
+      "enabled": true,
+      "probe": {
+        "api_ok": true
+      },
+      "checks": [
+        {
+          "name": "config",
+          "ok": true,
+          "message": "m"
+        },
+        {
+          "name": "credential",
+          "ok": true,
+          "message": "m"
+        },
+        {
+          "name": "probe",
+          "ok": true,
+          "message": "m"
+        },
+        {
+          "name": "test_message",
+          "ok": true,
+          "message": "m"
+        }
+      ]
+    },
+    "failed_credential": {
+      "ok": false,
+      "enabled": true,
+      "checks": [
+        {
+          "name": "config",
+          "ok": true,
+          "message": "m"
+        },
+        {
+          "name": "credential",
+          "ok": false,
+          "message": "m"
+        }
+      ]
+    },
+    "failed_probe": {
+      "ok": false,
+      "enabled": false,
+      "probe": {
+        "api_ok": false
+      },
+      "checks": [
+        {
+          "name": "config",
+          "ok": true,
+          "message": "m"
+        },
+        {
+          "name": "credential",
+          "ok": true,
+          "message": "m"
+        },
+        {
+          "name": "probe",
+          "ok": false,
+          "message": "m"
+        }
+      ]
+    },
+    "disabled": {
+      "outcome": "disabled"
+    }
+  },
+  "invalid": {
+    "empty": {
+      "instance": {},
+      "path": []
+    },
+    "ok_true_with_failed_check": {
+      "instance": {
+        "ok": true,
+        "enabled": true,
+        "checks": [
+          {
+            "name": "config",
+            "ok": false,
+            "message": "m"
+          }
+        ]
+      },
+      "path": []
+    },
+    "ok_false_all_ok": {
+      "instance": {
+        "ok": false,
+        "enabled": true,
+        "checks": [
+          {
+            "name": "config",
+            "ok": true,
+            "message": "m"
+          }
+        ]
+      },
+      "path": []
+    },
+    "missing_checks": {
+      "instance": {
+        "ok": true,
+        "enabled": true
+      },
+      "path": []
+    },
+    "unknown_check_name": {
+      "instance": {
+        "ok": true,
+        "enabled": true,
+        "checks": [
+          {
+            "name": "tls",
+            "ok": true,
+            "message": "m"
+          }
+        ]
+      },
+      "path": []
+    },
+    "check_without_message": {
+      "instance": {
+        "ok": true,
+        "enabled": true,
+        "checks": [
+          {
+            "name": "config",
+            "ok": true
+          }
+        ]
+      },
+      "path": []
+    },
+    "warnings_key": {
+      "instance": {
+        "ok": true,
+        "enabled": true,
+        "checks": [],
+        "warnings": []
+      },
+      "path": []
+    },
+    "probe_without_api_ok": {
+      "instance": {
+        "ok": true,
+        "enabled": true,
+        "probe": {},
+        "checks": []
+      },
+      "path": []
+    },
+    "disabled_with_extra": {
+      "instance": {
+        "outcome": "disabled",
+        "ok": true
+      },
+      "path": []
+    },
+    "other_outcome": {
+      "instance": {
+        "outcome": "sent"
+      },
+      "path": []
+    }
+  }
+}

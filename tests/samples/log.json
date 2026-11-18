@@ -1,0 +1,828 @@
+{
+  "valid": {
+    "sent": {
+      "ts": "2026-11-17T12:00:00.123Z",
+      "tool": "ha-notice",
+      "version": "0.1.0",
+      "outcome": "sent",
+      "exit": 0,
+      "code": null,
+      "reason": null,
+      "level": "info",
+      "bytes": 42,
+      "truncated": false,
+      "duration_ms": 120,
+      "http_status": 200,
+      "message_sha256": "0123456789abcdef",
+      "dedupe_key_sha256": null,
+      "tag_set": false,
+      "actor": "auto:cron",
+      "actor_source": "default"
+    },
+    "refused": {
+      "ts": "2026-11-17T12:00:00.123Z",
+      "tool": "ha-notice",
+      "version": "0.1.0",
+      "outcome": "refused",
+      "exit": 20,
+      "code": "refused",
+      "reason": "empty_message",
+      "level": null,
+      "bytes": null,
+      "truncated": null,
+      "duration_ms": 120,
+      "http_status": null,
+      "message_sha256": null,
+      "dedupe_key_sha256": null,
+      "tag_set": null,
+      "actor": "auto:cron",
+      "actor_source": "default"
+    },
+    "failed": {
+      "ts": "2026-11-17T12:00:00.123Z",
+      "tool": "ha-notice",
+      "version": "0.1.0",
+      "outcome": "failed",
+      "exit": 12,
+      "code": "network_error",
+      "reason": null,
+      "level": "info",
+      "bytes": 42,
+      "truncated": false,
+      "duration_ms": 120,
+      "http_status": null,
+      "message_sha256": "0123456789abcdef",
+      "dedupe_key_sha256": null,
+      "tag_set": false,
+      "actor": "auto:cron",
+      "actor_source": "default"
+    },
+    "failed_unavailable": {
+      "ts": "2026-11-17T12:00:00.123Z",
+      "tool": "ha-notice",
+      "version": "0.1.0",
+      "outcome": "failed",
+      "exit": 12,
+      "code": "unavailable",
+      "reason": null,
+      "level": "info",
+      "bytes": 42,
+      "truncated": false,
+      "duration_ms": 120,
+      "http_status": null,
+      "message_sha256": "0123456789abcdef",
+      "dedupe_key_sha256": null,
+      "tag_set": false,
+      "actor": "auto:cron",
+      "actor_source": "default"
+    },
+    "outcome_unknown_12": {
+      "ts": "2026-11-17T12:00:00.123Z",
+      "tool": "ha-notice",
+      "version": "0.1.0",
+      "outcome": "outcome_unknown",
+      "exit": 12,
+      "code": "outcome_unknown",
+      "reason": null,
+      "level": "info",
+      "bytes": 42,
+      "truncated": false,
+      "duration_ms": 120,
+      "http_status": null,
+      "message_sha256": "0123456789abcdef",
+      "dedupe_key_sha256": null,
+      "tag_set": false,
+      "actor": "auto:cron",
+      "actor_source": "default"
+    },
+    "outcome_unknown_upstream": {
+      "ts": "2026-11-17T12:00:00.123Z",
+      "tool": "ha-notice",
+      "version": "0.1.0",
+      "outcome": "outcome_unknown",
+      "exit": 12,
+      "code": "upstream_error",
+      "reason": null,
+      "level": "info",
+      "bytes": 42,
+      "truncated": false,
+      "duration_ms": 120,
+      "http_status": 502,
+      "message_sha256": "0123456789abcdef",
+      "dedupe_key_sha256": null,
+      "tag_set": false,
+      "actor": "auto:cron",
+      "actor_source": "default"
+    },
+    "outcome_unknown_internal": {
+      "ts": "2026-11-17T12:00:00.123Z",
+      "tool": "ha-notice",
+      "version": "0.1.0",
+      "outcome": "outcome_unknown",
+      "exit": 1,
+      "code": "internal",
+      "reason": null,
+      "level": "info",
+      "bytes": 42,
+      "truncated": false,
+      "duration_ms": 120,
+      "http_status": null,
+      "message_sha256": "0123456789abcdef",
+      "dedupe_key_sha256": null,
+      "tag_set": false,
+      "actor": "auto:cron",
+      "actor_source": "default"
+    },
+    "human_actor_with_key": {
+      "ts": "2026-11-17T12:00:00.123Z",
+      "tool": "ha-notice",
+      "version": "0.1.0",
+      "outcome": "sent",
+      "exit": 0,
+      "code": null,
+      "reason": null,
+      "level": "info",
+      "bytes": 42,
+      "truncated": false,
+      "duration_ms": 120,
+      "http_status": 200,
+      "message_sha256": "0123456789abcdef",
+      "dedupe_key_sha256": "fedcba9876543210",
+      "tag_set": true,
+      "actor": "human:jane_doe@host",
+      "actor_source": "tty"
+    }
+  },
+  "invalid": {
+    "empty": {
+      "instance": {},
+      "path": []
+    },
+    "ts_trailing_lf": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z\n",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "ts"
+      ]
+    },
+    "ts_no_millis": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "ts"
+      ]
+    },
+    "ts_offset": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123+00:00",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "ts"
+      ]
+    },
+    "actor_trailing_lf": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "human:me\n",
+        "actor_source": "default"
+      },
+      "path": [
+        "actor"
+      ]
+    },
+    "actor_no_prefix": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "me",
+        "actor_source": "default"
+      },
+      "path": [
+        "actor"
+      ]
+    },
+    "actor_too_long": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "actor_source": "default"
+      },
+      "path": [
+        "actor"
+      ]
+    },
+    "actor_source_bad": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "env"
+      },
+      "path": [
+        "actor_source"
+      ]
+    },
+    "hash_trailing_lf": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef\n",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "message_sha256"
+      ]
+    },
+    "hash_too_long": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef0",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "message_sha256"
+      ]
+    },
+    "hash_uppercase": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789ABCDEF",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "message_sha256"
+      ]
+    },
+    "wrong_tool": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "slack-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "tool"
+      ]
+    },
+    "bad_exit": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 2,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "exit"
+      ]
+    },
+    "bad_outcome": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "queued",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "outcome"
+      ]
+    },
+    "sent_with_code": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": "internal",
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "code"
+      ]
+    },
+    "sent_exit_12": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 12,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "exit"
+      ]
+    },
+    "refused_wrong_exit": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "refused",
+        "exit": 12,
+        "code": "refused",
+        "reason": "empty_message",
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "exit"
+      ]
+    },
+    "refused_without_reason": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "refused",
+        "exit": 20,
+        "code": "refused",
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "reason"
+      ]
+    },
+    "refused_reason_not_a_code": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "refused",
+        "exit": 20,
+        "code": "empty_message",
+        "reason": "empty_message",
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "code"
+      ]
+    },
+    "failed_with_unknown_code": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "failed",
+        "exit": 12,
+        "code": "outcome_unknown",
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "code"
+      ]
+    },
+    "failed_with_reason": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "failed",
+        "exit": 12,
+        "code": "network_error",
+        "reason": "link_invalid",
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "reason"
+      ]
+    },
+    "outcome_unknown_bad_code": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "outcome_unknown",
+        "exit": 12,
+        "code": "network_error",
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": []
+    },
+    "exit_1_not_outcome_unknown": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "failed",
+        "exit": 1,
+        "code": "internal",
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "exit"
+      ]
+    },
+    "exit_1_wrong_code": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "outcome_unknown",
+        "exit": 1,
+        "code": "network_error",
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "code"
+      ]
+    },
+    "missing_field": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": []
+    },
+    "extra_field_message": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default",
+        "message": "secret text"
+      },
+      "path": []
+    },
+    "negative_duration": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": -1,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "duration_ms"
+      ]
+    },
+    "null_duration": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": null,
+        "http_status": 200,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "duration_ms"
+      ]
+    },
+    "status_range": {
+      "instance": {
+        "ts": "2026-11-17T12:00:00.123Z",
+        "tool": "ha-notice",
+        "version": "0.1.0",
+        "outcome": "sent",
+        "exit": 0,
+        "code": null,
+        "reason": null,
+        "level": "info",
+        "bytes": 42,
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 99,
+        "message_sha256": "0123456789abcdef",
+        "dedupe_key_sha256": null,
+        "tag_set": false,
+        "actor": "auto:cron",
+        "actor_source": "default"
+      },
+      "path": [
+        "http_status"
+      ]
+    }
+  }
+}

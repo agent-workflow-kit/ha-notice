@@ -1,0 +1,354 @@
+{
+  "valid": {
+    "sent": {
+      "outcome": "sent",
+      "tool": "ha-notice",
+      "level": "info",
+      "truncated": false,
+      "bytes": 42,
+      "duration_ms": 120,
+      "http_status": 200,
+      "tag_set": false,
+      "dedupe_key": null,
+      "warnings": []
+    },
+    "sent_with_key_and_warning": {
+      "outcome": "sent",
+      "tool": "ha-notice",
+      "level": "info",
+      "truncated": false,
+      "bytes": 42,
+      "duration_ms": 120,
+      "http_status": 200,
+      "tag_set": true,
+      "dedupe_key": "k",
+      "warnings": [
+        "insecure_http"
+      ]
+    },
+    "dry_run": {
+      "outcome": "dry_run",
+      "tool": "ha-notice",
+      "level": "info",
+      "truncated": false,
+      "bytes": 42,
+      "duration_ms": 120,
+      "http_status": null,
+      "tag_set": false,
+      "dedupe_key": null,
+      "warnings": [],
+      "rendered": {
+        "message": "hi"
+      }
+    },
+    "dry_run_full": {
+      "outcome": "dry_run",
+      "tool": "ha-notice",
+      "level": "info",
+      "truncated": false,
+      "bytes": 42,
+      "duration_ms": 120,
+      "http_status": null,
+      "tag_set": false,
+      "dedupe_key": null,
+      "warnings": [],
+      "rendered": {
+        "title": "WARN: t",
+        "message": "m",
+        "data": {
+          "tag": "x"
+        }
+      }
+    },
+    "disabled": {
+      "outcome": "disabled"
+    }
+  },
+  "invalid": {
+    "empty": {
+      "instance": {},
+      "path": []
+    },
+    "bad_outcome": {
+      "instance": {
+        "outcome": "queued"
+      },
+      "path": [
+        "outcome"
+      ]
+    },
+    "disabled_with_extra": {
+      "instance": {
+        "outcome": "disabled",
+        "tool": "ha-notice"
+      },
+      "path": []
+    },
+    "sent_missing_field": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": []
+      },
+      "path": []
+    },
+    "sent_with_rendered": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "rendered": {
+          "message": "m"
+        }
+      },
+      "path": []
+    },
+    "sent_null_status": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": []
+      },
+      "path": [
+        "http_status"
+      ]
+    },
+    "dry_run_with_status": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "rendered": {
+          "message": "hi"
+        }
+      },
+      "path": [
+        "http_status"
+      ]
+    },
+    "dry_run_without_rendered": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": []
+      },
+      "path": []
+    },
+    "wrong_tool": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "other",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": []
+      },
+      "path": [
+        "tool"
+      ]
+    },
+    "bad_level": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "fatal",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": []
+      },
+      "path": [
+        "level"
+      ]
+    },
+    "negative_bytes": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": -1,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": []
+      },
+      "path": [
+        "bytes"
+      ]
+    },
+    "status_range": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": 600,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": []
+      },
+      "path": [
+        "http_status"
+      ]
+    },
+    "unknown_warning": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [
+          "other"
+        ]
+      },
+      "path": [
+        "warnings",
+        0
+      ]
+    },
+    "duplicate_warning": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [
+          "insecure_http",
+          "insecure_http"
+        ]
+      },
+      "path": [
+        "warnings"
+      ]
+    },
+    "empty_dedupe_key": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": "",
+        "warnings": []
+      },
+      "path": [
+        "dedupe_key"
+      ]
+    },
+    "rendered_without_message": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "rendered": {
+          "title": "t"
+        }
+      },
+      "path": [
+        "rendered"
+      ]
+    },
+    "rendered_extra_key": {
+      "instance": {
+        "outcome": "dry_run",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": null,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "rendered": {
+          "message": "m",
+          "token": "x"
+        }
+      },
+      "path": [
+        "rendered"
+      ]
+    },
+    "extra_key": {
+      "instance": {
+        "outcome": "sent",
+        "tool": "ha-notice",
+        "level": "info",
+        "truncated": false,
+        "bytes": 42,
+        "duration_ms": 120,
+        "http_status": 200,
+        "tag_set": false,
+        "dedupe_key": null,
+        "warnings": [],
+        "url": "https://x"
+      },
+      "path": []
+    }
+  }
+}
