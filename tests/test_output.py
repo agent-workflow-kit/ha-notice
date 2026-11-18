@@ -742,7 +742,7 @@ def _proc(tmp_path: Path, args: list[str], **streams: Any) -> subprocess.Complet
 
 def test_real_process_exit_1_envelope_is_ascii_safe_under_the_c_locale(tmp_path: Path) -> None:
     # The send stub exits 1 until #27; this checks the whole exit-1 path of a real process.
-    proc = _proc(tmp_path, ["--json", "send", "--message=é"])
+    proc = _proc(tmp_path, ["--json", "validate"])
     assert proc.returncode == 1
     assert schema_errors("cli/error", json.loads(proc.stdout)) == []
     assert proc.stderr == b"internal: command not implemented\n"
@@ -750,7 +750,7 @@ def test_real_process_exit_1_envelope_is_ascii_safe_under_the_c_locale(tmp_path:
 
 def test_real_process_exit_1_to_dev_full_keeps_the_exit_code(tmp_path: Path) -> None:
     with open("/dev/full", "wb") as full:
-        proc = _proc(tmp_path, ["--json", "send", "--message=a"], stdout=full, stderr=full)
+        proc = _proc(tmp_path, ["--json", "validate"], stdout=full, stderr=full)
     assert proc.returncode == 1
 
 
@@ -758,16 +758,14 @@ def test_real_process_exit_1_with_a_closed_pipe_keeps_the_exit_code(tmp_path: Pa
     read_end, write_end = os.pipe()
     os.close(read_end)
     try:
-        proc = _proc(
-            tmp_path, ["--json", "send", "--message=a"], stdout=write_end, stderr=write_end
-        )
+        proc = _proc(tmp_path, ["--json", "validate"], stdout=write_end, stderr=write_end)
     finally:
         os.close(write_end)
     assert proc.returncode == 1
 
 
 def test_real_process_exit_1_with_closed_standard_streams(tmp_path: Path) -> None:
-    cmd = f"exec {sys.executable} -m ha_notice --json send --message=a 1>&- 2>&-"
+    cmd = f"exec {sys.executable} -m ha_notice --json validate 1>&- 2>&-"
     proc = subprocess.run(
         ["/bin/sh", "-c", cmd],
         stdin=subprocess.DEVNULL,

@@ -43,6 +43,7 @@ from ha_notice.output import (
     reset_emitted,
     write_text,
 )
+from ha_notice.send import run_send
 
 __all__ = ["dumps", "emit_error", "write_text"]  # re-exported (see output.py)
 
@@ -399,10 +400,7 @@ def _not_implemented(inv: Invocation) -> int:
 
 
 def _send(inv: Invocation) -> int:
-    # TODO(#27): the send flow (config, input, render, request, output, log). #27 must treat an
-    # empty or nonexistent --config as config_invalid (details.key "--config") and an empty or
-    # nonexistent --file as exit 2 usage at step 3 (after the disabled check).
-    return _not_implemented(inv)
+    return run_send(inv)
 
 
 def _validate(inv: Invocation) -> int:

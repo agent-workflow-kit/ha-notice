@@ -98,6 +98,7 @@ OVERRIDE_MESSAGES = frozenset(
         "text flags need --message",
         "unexpected --",
         "command not implemented",
+        "the --file source cannot be read",
     }
 )
 _KEY_RE = re.compile(r"[A-Za-z0-9_]{1,64}")
