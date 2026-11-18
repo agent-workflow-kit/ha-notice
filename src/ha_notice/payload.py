@@ -201,7 +201,7 @@ def validate_notification(obj: object) -> Notification:
         link = obj["link"]
     if message is None or is_empty_text(message):
         raise PayloadError("empty_message")
-    # TODO(#15): decide the order against the link failures when the link rule lands.
+    # Order: link failures, then empty_message, then command_keyword (docs/interface.md).
     if check_command_keyword(message):
         raise PayloadError("command_keyword")
     return Notification(message=message, level=level, title=title, link=link)
