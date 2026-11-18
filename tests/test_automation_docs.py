@@ -229,13 +229,15 @@ def test_env_file_commands_never_truncate_an_existing_file(tmp_path: Path) -> No
     env = {"PATH": os.environ["PATH"], "HOME": str(home), "EDITOR": "true"}
     script = "umask\n" + _named("envsetup") + "umask\n"
     path = home / ".config" / "ha-notice" / "env"
-    for _ in range(2):
+    for run in (1, 2):
         result = subprocess.run(["sh", "-c", script], env=env, text=True, capture_output=True)
         assert result.returncode == 0, result.stderr
         umasks = [x for x in result.stdout.splitlines() if x.isdigit()]
         assert umasks[0] == umasks[-1]  # umask 077 does not leak into the caller's shell
-        if not path.read_text(encoding="utf-8"):
-            path.write_text("HA_TOKEN='placeholder'\n", encoding="utf-8")
+        if run == 1:
+            assert path.read_text(encoding="utf-8") == ""
+            path.write_text("HA_TOKEN='placeholder'\n", encoding="utf-8")  # the person's edit
+    # The second run found the file and must have left the token alone.
     assert path.read_text(encoding="utf-8") == "HA_TOKEN='placeholder'\n"
     assert path.stat().st_mode & 0o777 == 0o600
 
@@ -482,5 +484,8 @@ def test_the_guide_states_the_caveats_of_the_wrapper_and_the_exit_20_exceptions(
     assert "tool's own one-line" in text
     # The exit-20 row keeps the interface's exceptions (interface.md, Calling from automation).
     assert "once without `link`" in text and "`link_scheme`" in text
+    assert "prefixed by its source and a colon" in text
     section = README.read_text(encoding="utf-8").split("## Calling from automation", 1)[1]
-    assert "once without `link`" in section.split("\n## ", 1)[0]
+    section = section.split("\n## ", 1)[0]
+    assert "once without `link`" in section
+    assert "prefixed by its source and a colon" in section
