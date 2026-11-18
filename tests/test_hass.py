@@ -7,6 +7,7 @@ server (``tests/fake_ha.py``). Response mapping, retries and the deadline belong
 
 from __future__ import annotations
 
+import dataclasses
 import http.client
 import json
 import os
@@ -493,6 +494,25 @@ def test_before_write_runs_after_connect_and_before_any_byte_is_written() -> Non
 
         exchange(conn, target_for(ha), "GET", "/api/", None, before_write=gate)
     assert events == ["gate"] and len(ha.requests) == 1
+
+
+def test_an_unknown_scheme_is_refused_before_any_connection() -> None:
+    class CountingGateway:
+        def __init__(self) -> None:
+            self.connects = 0
+
+        def connect(self, spec: ConnectSpec) -> object:
+            self.connects += 1
+            raise AssertionError("no connection may be attempted")
+
+    parsed = parse_base_url("http://ha.example")
+    assert parsed is not None
+    target = Target(dataclasses.replace(parsed, scheme="ftp"), TOKEN, "HA_TOKEN", None, 1.0, 1.0)
+    gateway = CountingGateway()
+    with pytest.raises(ValueError, match="unsupported scheme") as caught:
+        open_connection(gateway, target)  # type: ignore[arg-type]
+    assert gateway.connects == 0
+    assert TOKEN not in str(caught.value)
 
 
 def test_a_refusing_gate_writes_nothing_and_closes() -> None:

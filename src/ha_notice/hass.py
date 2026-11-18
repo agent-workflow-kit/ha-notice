@@ -222,7 +222,13 @@ def open_connection(gateway: Gateway, target: Target) -> Connection:
     The connection is closed again when connecting fails. TODO(#25): the writing gate is taken
     by the caller after this returns, before ``exchange``.
     """
-    scheme: Literal["http", "https"] = "https" if target.base.scheme == "https" else "http"
+    scheme: Literal["http", "https"]
+    if target.base.scheme == "https":
+        scheme = "https"
+    elif target.base.scheme == "http":
+        scheme = "http"
+    else:
+        raise ValueError("unsupported scheme for the Home Assistant base URL")
     spec = ConnectSpec(
         scheme,
         target.base.host,
