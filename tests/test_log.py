@@ -404,7 +404,12 @@ def test_descriptors_do_not_leak_on_success_or_failure(home: Path, sdir: Path) -
         (
             "outcome-unknown",
             "ok",
-            {"exit_code": 12, "code": "upstream_error", "unknown_outcome": True, "http_status": 502},
+            {
+                "exit_code": 12,
+                "code": "upstream_error",
+                "unknown_outcome": True,
+                "http_status": 502,
+            },
         ),
         (
             "internal-after-writing",

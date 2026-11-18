@@ -44,7 +44,7 @@ __all__ = [
 
 LOG_NAME = "log.jsonl"
 LOCK_NAME = "log.lock"
-ROTATE_AT = 1024 * 1024  # a log of this size or more is rotated (a module value so tests can lower it)
+ROTATE_AT = 1024 * 1024  # a log this size or larger is rotated (module value: tests lower it)
 KEPT = 3  # log.jsonl.1 .. log.jsonl.3
 LOCK_POLL = 0.02
 LOCK_BUDGET = 1.0
@@ -91,7 +91,7 @@ def outcome_for(exit_code: int, unknown_outcome: bool) -> str | None:
 
 
 def format_ts(wall_time: float) -> str:
-    """``YYYY-MM-DDTHH:MM:SS.mmmZ`` in UTC, rounded to the millisecond; ValueError if out of range."""
+    """``YYYY-MM-DDTHH:MM:SS.mmmZ`` in UTC to the millisecond; ValueError when out of range."""
     if not math.isfinite(wall_time):
         raise ValueError("wall time is not finite")
     total_ms = round(wall_time * 1000)
@@ -101,9 +101,7 @@ def format_ts(wall_time: float) -> str:
     return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%dT%H:%M:%S") + f".{ms:03d}Z"
 
 
-def build_record(
-    facts: RunFacts, *, ts: str, version: str = __version__
-) -> dict[str, Any] | None:
+def build_record(facts: RunFacts, *, ts: str, version: str = __version__) -> dict[str, Any] | None:
     """The record for a run (keys in schema order), or None when the run is not logged."""
     outcome = outcome_for(facts.exit_code, facts.unknown_outcome)
     if outcome is None:
