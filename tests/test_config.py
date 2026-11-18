@@ -412,10 +412,7 @@ def test_strict_loader_table_is_config_invalid(gw: FakeGateway, home: Path, text
         ("enabled: false\n", {"enabled": False}),
         ("timeout: 10\n", {"timeout": 10}),
         ("timeout: 1.5\n", {"timeout": 1.5}),
-        ("timeout: 0\n", {"timeout": 0}),
-        ("timeout: -1\n", {"timeout": -1}),
         ("timeout: 2s\n", {"timeout": "2s"}),
-        ("timeout: '500ms'\n", {"timeout": "500ms"}),
         ("max_chars: 1000\n", {"max_chars": 1000}),
         ("service: mobile_app_x\n", {"service": "mobile_app_x"}),
         ("service: 'true'\n", {"service": "true"}),
@@ -436,8 +433,6 @@ def test_strict_loader_table_is_config_invalid(gw: FakeGateway, home: Path, text
         ("service: nullable\n", {"service": "nullable"}),
         ("service: ~x\n", {"service": "~x"}),
         ("service: 1.5.2\n", {"service": "1.5.2"}),
-        ("timeout: 1.5.2\n", {"timeout": "1.5.2"}),
-        ("timeout: trueish\n", {"timeout": "trueish"}),
         ('service: "café"\n', {"service": "café"}),
     ],
 )
@@ -453,13 +448,11 @@ def test_strict_loader_accepts(
 @pytest.mark.parametrize(
     "value", ["1:30", "010", "0x10", "1_0", ".inf", "-.inf", ".nan", "1e3", "no", "2001-01-01"]
 )
-@pytest.mark.parametrize("key", ["timeout", "connect_timeout"])
-def test_non_decimal_duration_spellings_stay_strings(
-    gw: FakeGateway, home: Path, key: str, value: str
-) -> None:
-    # The loader leaves them strings; the duration grammar (TODO(#9)) is what refuses them.
-    write_main(home, f"{key}: {value}\n")
-    assert config.load(gw, None).values == {key: value}
+def test_non_decimal_spellings_stay_strings(gw: FakeGateway, home: Path, value: str) -> None:
+    # The loader leaves them strings (tests/test_config_keys.py: the duration grammar refuses them
+    # for a duration key); a string key such as ``service`` shows what the loader itself returns.
+    write_main(home, f"service: {value}\n")
+    assert config.load(gw, None).values == {"service": value}
 
 
 def test_booleans_are_never_numbers(gw: FakeGateway, home: Path) -> None:

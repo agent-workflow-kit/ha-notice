@@ -175,7 +175,7 @@ def test_link_hosts_refuses_a_trailing_lf() -> None:
 # token_env and default_group: the schema refuses a trailing LF, and so does a full match (which
 # is how the tool applies every pattern). The actor pattern has its own test below.
 # TODO(#10): the tool's token_env check (re.fullmatch of this same pattern) is tested there.
-# TODO(#9): the tool's default_group check (re.fullmatch of this same pattern) is tested there.
+# The tool's default_group check (a full match) is compared in tests/test_config_keys.py.
 @pytest.mark.parametrize(
     ("schema", "path", "good"),
     [

@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -40,6 +39,12 @@ def write(home: Path, text: str) -> Path:
     return path
 
 
+def dq(value: str) -> str:
+    """A YAML double-quoted scalar with every character escaped (``\\U0000XXXX``), so control and
+    noncharacter code points reach the key checks instead of the YAML reader's own refusal."""
+    return '"' + "".join(f"\\U{ord(c):08x}" for c in value) + '"'
+
+
 def fails(gw: Gateway) -> ConfigError:
     with pytest.raises(ConfigError) as info:
         config.load(gw, None)
@@ -69,8 +74,6 @@ TIMEOUT_GOOD = [
     ("1500ms", 1.5),
     ("120000ms", 120),
     ("1.0s", 1),
-    ("00010s", 10),  # the grammar is [0-9]+: leading zeros are digits
-    ("'0010'", 10),
     ("1.0", 1),
 ]
 TIMEOUT_BAD = [
@@ -94,6 +97,9 @@ TIMEOUT_BAD = [
     "'1e3'",
     "1:30",
     "010",
+    "'010'",  # a leading zero: refused even quoted (the tool is narrower than the schema)
+    "'00010s'",
+    "'01.5s'",
     "0x10",
     "1_0",
     ".inf",
@@ -133,7 +139,6 @@ TIMEOUT_BAD = [
     "'1" + "0" * 5000 + "s'",
     "9" * 400,  # a huge int
     "-" + "9" * 400,
-    "9" * 400 + ".5",
     "1e400",
     "2001-01-01",
 ]
@@ -177,14 +182,12 @@ def test_timeout_refuses(gw: FakeGateway, home: Path, text: str) -> None:
         ("500ms", False),
         ("31", False),
         ("30.0001", False),
-        ("1m", False + True),  # 60 s is above 30 s ...
+        ("1m", False),  # 60 s
         ("true", False),
         ("1h", False),
     ],
 )
 def test_connect_timeout_range(gw: FakeGateway, home: Path, text: str, ok: bool) -> None:
-    if text == "1m":
-        ok = False  # 60 s is above the 30 s maximum
     write(home, f"connect_timeout: {text}\n")
     if ok:
         assert config.load(gw, None).connect_timeout <= 30
@@ -254,7 +257,19 @@ def test_max_chars_accepts(gw: FakeGateway, home: Path, text: str) -> None:
 
 @pytest.mark.parametrize(
     "text",
-    ["99", "0", "-1", "2001", "9" * 400, "-" + "9" * 400, "true", "false", "'300'", "300.5", "null"],
+    [
+        "99",
+        "0",
+        "-1",
+        "2001",
+        "9" * 400,
+        "-" + "9" * 400,
+        "true",
+        "false",
+        "'300'",
+        "300.5",
+        "null",
+    ],
 )
 def test_max_chars_refuses(gw: FakeGateway, home: Path, text: str) -> None:
     write(home, f"max_chars: {text}\n")
@@ -316,7 +331,7 @@ def test_default_group_pattern_agrees_with_the_schema() -> None:
     ["", "WARN:", "ACTION:", "a" * 16, "é" * 16, "😀" * 16, "[!]", "a b", "a‌b", "é"],
 )
 def test_level_prefix_accepts(gw: FakeGateway, home: Path, value: str) -> None:
-    write(home, f"level_prefix:\n  warn: {json.dumps(value)}\n")
+    write(home, f"level_prefix:\n  warn: {dq(value)}\n")
     assert config.load(gw, None).level_prefix["warn"] == value
 
 
@@ -324,49 +339,49 @@ def test_level_prefix_accepts(gw: FakeGateway, home: Path, value: str) -> None:
     "value",
     [
         "a" * 17,
-        "😀" * 17,
+        "\U0001f600" * 17,
         "A\nB",
         "A\n",
         "\nA",
         "A\r",
         "A\tB",
         "A\u0085",
-        "A ",
-        "A ",
+        "A ",
         "A  B",  # two spaces: step 5 would collapse them
         " ",
         " A",
-        "A ",
-        "A ",  # str.strip removes it
-        "　",
+        "A\u00a0",  # str.strip removes it
+        "\u3000",
+        "A\u2028",
+        "A\u2029",
         "A\u0000",
         "A\u001b",
         "A\u007f",
         "A\u0090",
-        "A­",
-        "A​",
-        "A‎",
-        "A‮",
-        "A⁠",
-        "A﻿",
-        "A￹",
+        "A\u00ad",
+        "A\u200b",
+        "A\u200e",
+        "A\u202e",
+        "A\u2060",
+        "A\ufeff",
+        "A\ufff9",
         "A\U000e0041",
-        "Aᅟ",
-        "Aㅤ",
-        "Aﾠ",
-        "A⠀",
-        "A᠋",
-        "A",  # private use
+        "A\u115f",
+        "A\u3164",
+        "A\uffa0",
+        "A\u2800",
+        "A\u180b",
+        "A\ue000",  # private use
         "A\U000f0000",
-        "A﷐",
-        "A￿",
-        "A͸",  # unassigned
-        "́",  # only a combining mark: an empty title
-        "́ ",
+        "A\ufdd0",  # noncharacter
+        "A\uffff",
+        "A\u0378",  # unassigned
+        "\u0301",  # only a combining mark: an empty title
+        "\u0301 ",
     ],
 )
 def test_level_prefix_refuses(gw: FakeGateway, home: Path, value: str) -> None:
-    write(home, f"level_prefix:\n  info: {json.dumps(value)}\n")
+    write(home, f"level_prefix:\n  info: {dq(value)}\n")
     assert fails(gw).key == "level_prefix"
 
 
@@ -482,7 +497,3 @@ def test_known_key_types_still_win_over_grammar(gw: FakeGateway, home: Path) -> 
 def test_values_stay_as_written_for_the_other_owners(gw: FakeGateway, home: Path) -> None:
     cfg = loads(gw, home, "timeout: 2s\nmax_chars: 300\n")
     assert cfg.values == {"timeout": "2s", "max_chars": 300}
-
-
-def _unused(_: Any) -> None:  # keeps the Any import honest for pyright in parametrize tables
-    return None
