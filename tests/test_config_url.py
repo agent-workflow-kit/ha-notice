@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import stat
+import time
 from pathlib import Path
 
 import pytest
@@ -231,12 +232,23 @@ def test_base_url_that_is_not_a_string_is_refused() -> None:
 
 
 def test_base_url_hostile_input_is_fast() -> None:
+    start = time.perf_counter()
     for text in [
         "https://" + "a." * 1000 + "!",
         "https://x/" + "a/" * 1000 + "!",
         "https://x" + "/" * 2000,
     ]:
         config.parse_base_url(text)
+    assert time.perf_counter() - start < 2.0
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["ht\u017ftp://h", "http\u017f://h", "HTTP\u017f://h", "\u212attps://h", "https\u212a://h"],
+)
+def test_base_url_scheme_is_ascii_only(text: str) -> None:
+    assert config.parse_base_url(text) is None
+    assert schema_errors("config", {"base_url": text})
 
 
 SCHEMA_CORPUS = [t for t, *_ in GOOD_URLS] + [
@@ -742,3 +754,12 @@ def test_example_still_loads(gw: FakeGateway, home: Path) -> None:
     write(home, example)
     cfg = config.load(gw, None)
     assert cfg.token_env == "HA_TOKEN"
+
+
+def test_read_token_refuses_a_non_ha_variable_name_on_a_directly_built_config() -> None:
+    cfg = config.Config(values={"token_env": "AWS_SECRET_ACCESS_KEY"})
+    with pytest.raises(CredentialError) as info:
+        cfg.read_token({"AWS_SECRET_ACCESS_KEY": FAKE_TOKEN})
+    assert info.value.env == "AWS_SECRET_ACCESS_KEY"
+    assert FAKE_TOKEN not in repr(info.value.error.envelope)
+    assert FAKE_TOKEN not in str(info.value)

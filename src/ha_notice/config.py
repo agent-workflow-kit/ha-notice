@@ -199,7 +199,8 @@ class Config:
                 raise ConfigError(name)
 
     def check_ca_file(self, gateway: Gateway) -> None:
-        """``ca_file``, when set, must be a readable regular file of at most MAX_CA_FILE_BYTES.
+        """``ca_file``, when set, must be a readable regular file of at most MAX_CA_FILE_BYTES
+        (4 MiB).
         Only readability is checked here; loading the certificates is #22's. Raises
         ``ConfigError`` (key ``ca_file``); nothing about the failure is kept."""
         path = self.ca_file
@@ -217,6 +218,8 @@ class Config:
         the CLI was given), trimmed with ``str.strip``: 1 to 4096 characters, each U+0021 to
         U+007E. Raises ``CredentialError``, which never holds the value."""
         name = self.token_env
+        if not token_env_ok(name):  # whatever way this Config was built, only HA_ names are read
+            raise CredentialError(name)
         raw = env.get(name)
         token = raw.strip() if isinstance(raw, str) else ""
         if not (1 <= len(token) <= TOKEN_MAX_CHARS and TOKEN_RE.fullmatch(token)):
@@ -411,7 +414,7 @@ BASE_URL_MAX_CHARS = 2048
 # ``re.fullmatch`` anchors both ends. ``[0-9]`` and ``[A-Za-z0-9]`` are spelled out (never ``\d`` or
 # ``\w``) so no other script's digits or letters match.
 _BASE_URL_RE = re.compile(
-    r"(?P<scheme>(?i:https?))://"
+    r"(?P<scheme>[Hh][Tt][Tt][Pp][Ss]?)://"
     r"(?P<host>[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*|\[(?P<v6>[0-9A-Fa-f:.]+)\])"
     r"(?::(?P<port>[0-9]{1,5}))?"
     r"(?P<prefix>(?:/[A-Za-z0-9._~-]+)*)"
@@ -465,7 +468,10 @@ class BaseUrl:
 def parse_base_url(text: object) -> BaseUrl | None:
     """The parts of a ``base_url``, or ``None`` when it does not match the grammar as a whole
     (after one trailing ``/`` run), has a port outside 1 to 65535, a ``.`` or ``..`` segment or an
-    IPv6 literal that is not an address. The scheme is not judged here (see ``load``)."""
+    IPv6 literal that is not an address. The text between brackets must be a valid IPv6 address
+    (``ipaddress.IPv6Address``); the schema pattern is looser because it cannot express that. The
+    scheme is matched ASCII-only (``[Hh][Tt][Tt][Pp][Ss]?``) and is ``http`` or ``https`` after
+    lowercasing; whether ``http`` is allowed is judged in ``load``."""
     if type(text) is not str or len(text) > BASE_URL_MAX_CHARS:
         return None
     match = _BASE_URL_RE.fullmatch(text)
@@ -485,7 +491,10 @@ def parse_base_url(text: object) -> BaseUrl | None:
         except ValueError:
             return None
         host = v6
-    return BaseUrl(match.group("scheme").lower(), host.lower(), port, prefix, v6 is not None)
+    scheme = match.group("scheme").lower()
+    if scheme not in ("http", "https"):  # defence in depth: the pattern is ASCII-only
+        return None
+    return BaseUrl(scheme, host.lower(), port, prefix, v6 is not None)
 
 
 def service_ok(value: str) -> bool:
