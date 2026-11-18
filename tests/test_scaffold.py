@@ -25,9 +25,7 @@ def test_version_is_the_packaged_version() -> None:
 
 
 def test_version_output_golden(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as exc:
-        main(["--version"])
-    assert exc.value.code == 0
+    assert main(["--version"]) == 0
     out = capsys.readouterr()
     assert out.out == f"ha-notice {PYPROJECT['project']['version']}\n"
     assert out.err == ""
@@ -46,9 +44,7 @@ def test_version_output_from_a_real_process() -> None:
 
 
 def test_version_ignores_other_arguments_after_flag(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as exc:
-        main(["--version", "--bogus"])
-    assert exc.value.code == 0
+    assert main(["--version", "--bogus"]) == 0
     assert capsys.readouterr().out.startswith("ha-notice ")
 
 

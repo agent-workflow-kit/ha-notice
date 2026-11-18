@@ -191,7 +191,7 @@ def test_config_patterns_agree_with_a_full_match(schema: str, path: list[str], g
 
 
 def test_actor_pattern_agrees_with_a_full_match() -> None:
-    # TODO(#6): the tool's --actor check (re.fullmatch of this same pattern) is tested there.
+    # The tool's own check (cli.ACTOR_RE, a full match) is compared in tests/test_cli.py.
     pattern = load_schema("defs")["$defs"]["actor"]["pattern"]
     for value, ok in [("human:me", True), ("auto:a.b", True), ("human:me\n", False)]:
         assert bool(re.fullmatch(pattern, value)) is ok
