@@ -11,8 +11,14 @@ A refusal is a ``PayloadError``; ``PayloadError.to_error`` builds the exit 20 en
 ``output.build_error``. No refusal carries an input value: the pointer is ``/<field>`` for a plain
 field name and ``/?`` otherwise (``output.safe_pointer``), and the reason is a fixed word.
 
-TODO(#12): input reading limits and the hardened JSON parse (``details.pointer`` ``""`` for a
-parse failure); it hands the parsed value to ``validate_notification``.
+Input reading (issue #12): ``read_notification`` reads the source through the gateway (at most
+``INPUT_MAX`` bytes, in slices, against the deadline), decodes it as strict UTF-8 and parses it with
+``hardened_loads``; ``parse_notification`` hands the parsed value to ``validate_notification``.
+Every parse failure is ``invalid_payload`` with pointer ``""``. A stalled producer is
+``InputTimeout`` (exit 12 ``unavailable``, see ``input_timeout_error``); a bad ``--file`` is the
+gateway's ``SourceError`` (exit 2 ``usage``), which the caller maps.
+TODO(#26): signals during input (exit 128+N); the caller's ``remaining`` returns 0 on a signal,
+which today reads as a timeout.
 TODO(#13): the sanitizer (also the lone surrogate rule and the whitespace-only message, which is
 ``empty_message`` after sanitizing) and the title cut.
 TODO(#14): the command-keyword check. TODO(#15): the link rule. TODO(#16): ``link_hosts``.
@@ -20,12 +26,17 @@ TODO(#14): the command-keyword check. TODO(#15): the link rule. TODO(#16): ``lin
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import json
+import math
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ha_notice.gateway import Gateway
 from ha_notice.output import ErrorResult, build_error, safe_pointer
 
+INPUT_MAX = 1048576  # bytes read from one source (1 MiB)
+INT_DIGITS_MAX = 4300  # the interpreter's own default limit; kept here so an env setting cannot lift it
 TEXT_MAX = 100000  # characters of input for title and message
 LEVELS = ("info", "warn", "action", "error")  # ordered: info < warn < action < error
 DEFAULT_LEVEL = "info"
@@ -126,3 +137,107 @@ def notification_from_flags(
         if value is not None
     }
     return validate_notification(given)
+
+
+# --- input reading and the hardened JSON parse (issue #12) ---------------------------------------
+
+
+class InputTimeout(Exception):
+    """The input did not arrive before the deadline (exit 12 ``unavailable``, phase ``input``)."""
+
+
+def input_timeout_error() -> ErrorResult:
+    """The envelope of ``InputTimeout``: not sent, retryable, outcome known."""
+    return build_error("unavailable", phase="input")
+
+
+def _refuse_constant(_name: str) -> object:
+    raise ValueError("NaN and Infinity are not accepted")
+
+
+def _parse_int(text: str) -> int:
+    if len(text) > INT_DIGITS_MAX:
+        raise ValueError("integer too long")
+    return int(text)
+
+
+def _parse_float(text: str) -> float:
+    if len(text) > INT_DIGITS_MAX:
+        raise ValueError("number too long")
+    value = float(text)
+    if not math.isfinite(value):  # 1e999
+        raise ValueError("number out of range")
+    return value
+
+
+def _no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    out = dict(pairs)
+    if len(out) != len(pairs):
+        raise ValueError("duplicate key")
+    return out
+
+
+def hardened_loads(text: str) -> object:
+    """Parse JSON text, refusing duplicate keys, NaN and Infinity (also by overflow such as
+    ``1e999``), integers and numbers over 4300 characters and nesting the interpreter cannot
+    recurse into. Every failure is a ``ValueError`` whose text is fixed (no input is echoed).
+    Also used for the Home Assistant response body.
+    """
+    decoder = json.JSONDecoder(
+        object_pairs_hook=_no_duplicates,
+        parse_constant=_refuse_constant,
+        parse_int=_parse_int,
+        parse_float=_parse_float,
+        strict=True,
+    )
+    failed = False
+    try:
+        return decoder.decode(text)
+    except (ValueError, RecursionError, OverflowError):
+        failed = True
+    if failed:  # raised outside the handler: no context carries the original text
+        raise ValueError("invalid JSON")
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def parse_notification(data: bytes) -> Notification:
+    """Decode and parse the bytes of one input and validate the notification.
+
+    Strict UTF-8 (never the locale); a byte order mark is refused; any parse failure, a top level
+    that is not an object included, is ``invalid_payload`` with pointer ``""``.
+    """
+    if data.startswith(b"\xef\xbb\xbf"):
+        raise PayloadError("invalid_payload", None)
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = None
+    if text is None:
+        raise PayloadError("invalid_payload", None)
+    try:
+        obj = hardened_loads(text)
+    except ValueError:
+        obj = _FAILED
+    if obj is _FAILED:
+        raise PayloadError("invalid_payload", None)
+    return validate_notification(obj)
+
+
+_FAILED = object()
+
+
+def read_notification(
+    gateway: Gateway, source: int | str, remaining: Callable[[], float]
+) -> Notification:
+    """Read one source (a descriptor such as 0, or a ``--file`` path) and return its notification.
+
+    Raises ``InputTimeout`` when the deadline passes first (also with partial data),
+    ``PayloadError`` for anything refused (more than ``INPUT_MAX`` bytes included) and the
+    gateway's ``SourceError`` for a path that is missing, unreadable or not a regular file.
+    """
+    result = gateway.read_source(source, INPUT_MAX, remaining)
+    if result.status == "timeout":
+        raise InputTimeout
+    if result.status == "too_large" or len(result.data) > INPUT_MAX:
+        raise PayloadError("invalid_payload", None)
+    return parse_notification(result.data)
