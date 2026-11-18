@@ -18,19 +18,23 @@ The tool reads the token only from the environment variable named by `token_env`
 
 Create the file empty, with the right mode from the first byte, then put the token in with an editor so it never appears in shell history, argv or a terminal log:
 
+<!-- test:envsetup -->
+
 ```sh
-umask 077
-mkdir -p ~/.config/ha-notice
-install -m 600 /dev/null ~/.config/ha-notice/env
-${EDITOR:-vi} ~/.config/ha-notice/env
-ls -l ~/.config/ha-notice/env
+f=~/.config/ha-notice/env
+(umask 077; mkdir -p ~/.config/ha-notice; [ -e "$f" ] || install -m 600 /dev/null "$f")
+${EDITOR:-vi} "$f"
+ls -l "$f"
 ```
 
-The listing should start with `-rw-------`. The file is shell syntax, so single-quote the value; a long-lived token is printable ASCII without quotes. If you keep the token under another name, alias it to the name the config expects in the same file:
+The `umask 077` is scoped to the subshell, and an existing file is never truncated, so running the commands again keeps the token. The listing should start with `-rw-------`. The file is shell syntax, so single-quote the value; a long-lived token is printable ASCII without quotes. If you keep the token under another name, alias it to the name the config expects in the same file and unset the original, so that `set -a` exports only one copy of the token:
+
+<!-- test:envalias -->
 
 ```sh
 HOME_ASSISTANT_TOKEN='paste-the-long-lived-token-here'
 HA_TOKEN=$HOME_ASSISTANT_TOKEN
+unset HOME_ASSISTANT_TOKEN
 ```
 
 Alternatively set `token_env: HA_HOME_ASSISTANT_TOKEN` in the config and name the variable that way in the file; the name must still start with `HA_`. Cron's `sh` only needs `set -a` (see below) for the variables to reach the tool. The file is executed as shell by whoever sources it, so it must be owned by you and writable by nobody else.
@@ -41,20 +45,22 @@ Why not put the token on the command line or in the crontab: argv is readable by
 
 Cron starts jobs with a minimal environment, so spell out what the job needs. The crontab does not expand variables in assignments, so give `PATH` as a literal path (`uv tool install` puts the program in `~/.local/bin`). Cron runs the command with `/bin/sh`, so the line must be POSIX shell:
 
+<!-- test:cron -->
+
 ```crontab
 PATH=/home/me/.local/bin:/usr/bin:/bin
 */15 * * * * set -a; . "$HOME/.config/ha-notice/env"; set +a; /home/me/bin/check-disk
 ```
 
-- `set -a` exports every variable the file defines, including the alias, so the tool sees `HA_TOKEN`. `set +a` stops exporting after the file.
+- `set -a` exports every variable the file defines, so the tool sees `HA_TOKEN`. `set +a` stops exporting after the file.
 - If the env file is missing, the shell's `.` fails and a non-interactive `sh` stops before it runs the job. That is the safe behaviour: nothing runs without its token and cron mails the error.
 - `HOME` in the crontab line is whatever cron sets; the tool itself does not read it. It finds the config and the log directory from the account's home in the password database, so cron's `HOME` is irrelevant to where the config is read from. Use `--config <path>` for any other file.
 - In a crontab line an unescaped `%` ends the command and starts its standard input. Put anything with a `%` (a `date +%F`, say) in a script, or write `\%`.
 - Cron mails whatever a job prints, so a job should print nothing on success. The wrapper below does.
 
-A job script is ordinary shell. This one sends a warning when the root filesystem is nearly full, with a fixed payload in a here-document (a file, not a pipe) and a dedupe key so that a repeat replaces the earlier notification:
+A job script is ordinary shell. Save the wrapper from the exit-code section below as `notify-ha` in `~/.local/bin`, which is on the crontab `PATH` above, and this one as `/home/me/bin/check-disk`. It sends a warning when the root filesystem is nearly full, with a fixed payload in a here-document (a file, not a pipe) and a dedupe key so that a repeat replaces the earlier notification:
 
-```sh
+```bash
 #!/bin/bash
 used=$(df --output=pcent / | tail -n 1 | tr -dc 0-9)
 if [ "$used" -ge 90 ]; then
@@ -93,11 +99,11 @@ $ echo '{"title":"Build","message":"ok","level":"warn"}' | ha-notice send --stdi
 
 ## Exit codes: a wrapper
 
-Exit 22 means the tool is disabled in the config and nothing was sent; for a caller that is a successful no-op, so a shell caller writes `rc=$?; [ "$rc" = 22 ] && rc=0`. This wrapper does that, adds the kill timeout, prints nothing on success and prints the envelope once on stderr (which cron mails) on any failure:
+Exit 22 means the tool is disabled in the config and nothing was sent; for a caller that is a successful no-op, so a shell caller writes `rc=$?; [ "$rc" = 22 ] && rc=0`. This wrapper does that, adds the kill timeout, prints nothing on success and, on any failure, prints the envelope once on stderr (which cron mails) after the tool's own one-line `<code>: <message>` error on stderr:
 
 <!-- test:wrapper -->
 
-```sh
+```bash
 #!/bin/bash
 # notify-ha NAME [ha-notice flags]: JSON payload on stdin; the environment holds the token.
 # Exits 0 when sent or disabled, otherwise with the tool's exit code (124: the kill timeout fired).
@@ -112,6 +118,7 @@ fi
 exit "$rc"
 ```
 
+- The wrapper is silent only while the tool is: with `allow_insecure_http` set, the tool prints its `insecure_http` warning on stderr on every request, even with `--quiet`, so the job is not silent and cron mails it.
 - Do not add `set -e` before the `ha-notice` line: the script must read `$?` itself. If you source this logic into a script that has `set -e`, write `rc=0; out=$(...) || rc=$?` instead.
 - The line `[ "$rc" = 22 ] && rc=0` is a plain `&&` list, so it is safe even when `rc` is not 22 (the list's status is not used).
 - Exit 124 and an exit 1 without an envelope are unknown outcomes: the notification may have been delivered.
@@ -123,7 +130,7 @@ What each exit means for the caller (the full table is in the [interface](interf
 |---|---|---|
 | 0 | Sent, or a dry run. | Nothing. |
 | 22 | Disabled in the config; nothing sent. | Treat as success. |
-| 20 | The payload was refused; nothing sent. | Never retry; fix the payload and surface once. |
+| 20 | The payload was refused; nothing sent. | Do not retry the same payload; fix it and surface once. After `link_invalid` or `link_scheme` you may retry once without `link`, putting the URL in the message. |
 | 12 | Failed. Read `retryable` and `unknown_outcome`. | See below. |
 | 2 | Usage or config fault. | Never retry; a person fixes the deployment. |
 | 1 | Internal error. With no envelope the outcome is unknown. | Never blind-retry. |
@@ -142,7 +149,7 @@ This script retries an exit 12 only when the envelope says `retryable` is true, 
 
 <!-- test:retry -->
 
-```sh
+```bash
 #!/bin/bash
 # notify-ha-retry NAME PAYLOAD_FILE [DEDUPE_HEX]
 name=${1:?usage: notify-ha-retry NAME PAYLOAD_FILE [DEDUPE_HEX]}
@@ -171,7 +178,7 @@ Keep the key stable for the same event and put a sequence number or the level in
 
 ## Logs and machine-readable output
 
-- `--json` prints one document on stdout: the result on success, the error envelope on failure. Without it, a success prints `sent (<level>, <duration_ms> ms)` on stderr and a failure prints one `<code>: <message>` line on stderr. `--quiet` drops the informational stderr lines, but never the `insecure_http` warning.
+- `--json` prints one document on stdout: the result on success, the error envelope on failure, and a failure also prints one `<code>: <message>` line on stderr. Without it, a success prints `sent (<level>, <duration_ms> ms)` on stderr and a failure prints that one line. `--quiet` drops the informational stderr lines, but never the `insecure_http` warning.
 - The tool never prints a title, message, link, response body or the token, so its output is safe to put in a log. Put the envelope in your own log with the time and the job name.
 - The tool's own log is `log.jsonl` in `.local/state/ha-notice` under the account's home: hashes, counts, the outcome and the exit code. It records outcomes from the point where input is read; exit 2, exit 22, signals and dry runs are not logged.
 - `jq` is optional. To read one field of the envelope: `printf '%s' "$out" | jq -r '.error.code'`. Shell-only callers decide by the exit code, which carries most of the meaning, and print the envelope unparsed.
@@ -180,8 +187,12 @@ Keep the key stable for the same event and put a sequence number or the level in
 
 A doctor job runs `validate`, which never prompts and never reads stdin:
 
+<!-- test:health -->
+
 ```sh
-ha-notice validate --probe --json > /dev/null || echo "ha-notice health check failed" >&2
+ha-notice validate --probe --json > /dev/null; rc=$?
+[ "$rc" = 22 ] && rc=0
+[ "$rc" = 0 ] || echo "ha-notice health check failed (exit $rc)" >&2
 ```
 
 - Plain `validate` checks the config and that the token is set and well formed, with no network call: exit 0 when both pass, 2 for a config fault, 12 for a missing or malformed token.
@@ -204,22 +215,26 @@ A hook is called by another program (an editor, a build tool, an agent runner), 
 - Keep the kill timeout (`timeout 20`) so a stuck send is bounded, and always exit 0 from the hook.
 - Put the payload in a file that you create with mode 0600 and remove afterwards; do not build JSON from untrusted text in a shell string. Write the text to a file and wrap it with `jq -Rs` (optional; any JSON encoder works), so the text never touches argv.
 
-```sh
+<!-- test:hook -->
+
+```bash
 #!/bin/bash
 # hook-notify TEXT_FILE: send the file's text as a warning, in the background; never block, never fail.
 text=${1:?usage: hook-notify TEXT_FILE}
+log=$HOME/.cache/ha-notice-hook.log
 payload=$(mktemp) || exit 0
+mkdir -p "$HOME/.cache" || { rm -f "$payload"; exit 0; }
 jq -Rs '{title: "Build", message: ., level: "warn"}' < "$text" > "$payload" || { rm -f "$payload"; exit 0; }
-setsid bash -c 'timeout 20 ha-notice send --file "$1" --json --actor auto:hook; rm -f "$1"' hook "$payload" \
-  < /dev/null >> "$HOME/.cache/ha-notice-hook.log" 2>&1 &
+setsid bash -c 'trap "rm -f \"\$1\"" EXIT; exec >> "$2" 2>&1; timeout 20 ha-notice send --file "$1" --json --actor auto:hook' hook "$payload" "$log" \
+  < /dev/null > /dev/null 2>&1 &
 exit 0
 ```
 
-- `mktemp` creates the file with mode 0600. The log file holds only the tool's stdout and stderr, which never contain message text.
+- `mktemp` creates the file with mode 0600. The child opens the log itself and removes the payload in an `EXIT` trap, so a log that cannot be opened still leaves no payload behind. The log file holds only the tool's stdout and stderr, which never contain message text.
 - The token comes from the environment of the process that runs the hook. A hook started by a desktop or a service manager does not have your shell's variables: source the env file in the hook (`set -a; . "$HOME/.config/ha-notice/env"; set +a`) before the `setsid` line.
 - A hook must not call the tool again for a failure of the tool itself: that can loop. The tool has no hooks of its own for this reason.
 - For a message that is a fixed sentence, skip `jq` and the temp file: `printf '%s\n' '{"message":"nightly backup failed","level":"error"}' > "$payload"`.
 
 ## How the examples are tested
 
-The test suite syntax-checks every shell block in this guide. It runs the wrapper against a stub `ha-notice` that returns exits 0, 1, 2, 12, 20, 22 and 124, and against the real binary with `--dry-run` (exit 0), a config with `enabled: false` (the tool exits 22, the wrapper 0), a bad flag (2) and a missing token (12). It runs the retry script against stubs for a retryable failure, a permanent one, an unknown outcome and the cap, and it runs the cron line against a stub job to check that the alias reaches the job.
+The test suite syntax-checks every shell block in this guide (`bash -n` for a `bash` block, `sh -n` for an `sh` block). It runs the wrapper against a stub `ha-notice` that returns exits 0, 1, 2, 12, 20, 22 and 124, and against the real binary with `--dry-run` (exit 0), a config with `enabled: false` (the tool exits 22, the wrapper 0), a bad flag (2) and a missing token (12). It runs the retry script against stubs for a retryable failure, a permanent one, an unknown outcome and the cap, it runs the cron line against a stub job to check that the alias reaches the job and no second copy of the token does, and it runs the env-file commands twice, the health check and the hook against stubs.
