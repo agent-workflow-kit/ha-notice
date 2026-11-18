@@ -25,7 +25,7 @@ token_env: HA_TOKEN
 # Allow an http:// base_url. The token then travels in cleartext. Warns on stderr on every send.
 allow_insecure_http: false
 
-# Extra CA bundle, an absolute path, for a private certificate authority or a self-signed server.
+# Extra CA bundle, an absolute path to a readable regular file of at most 4 MiB, for a private certificate authority or a self-signed server.
 # Unset by default. There is no key that turns certificate checks off.
 # ca_file: /path/to/ca-bundle.pem
 
