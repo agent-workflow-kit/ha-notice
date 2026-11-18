@@ -7,6 +7,9 @@ a ``--file`` problem, 20, or 12 ``unavailable``), the tag is derived and the req
 rendered. With ``--dry-run`` the body is printed and the exit code is 0: no destination, no token,
 no network, no state directory, no log. The environment is never consulted before ``deliver``.
 
+``execute`` (steps 5 and 6) and ``build_plan`` (step 4) are shared with ``validate --test-message``
+(``validate.py``), which reports the ``Result`` as a check instead of printing it.
+
 ``deliver`` is steps 5 to 7: the token and trust (``hass.make_target``), the POST in the deadline
 worker (``deadline.run_with_deadline`` over ``retry.run_attempts``), the result on stdout and
 stderr (written and flushed), then the log step, then ``finish``. A refusal (20) or an input
@@ -67,7 +70,18 @@ from ha_notice.state import StateWarner
 if TYPE_CHECKING:
     from ha_notice.cli import Invocation
 
-__all__ = ["Plan", "deliver", "run_send"]
+__all__ = [
+    "InternalAfterWriting",
+    "Plan",
+    "Result",
+    "build_plan",
+    "deliver",
+    "execute",
+    "internal_after_writing",
+    "log_facts",
+    "result_facts",
+    "run_send",
+]
 
 TOOL = "ha-notice"
 
@@ -89,7 +103,7 @@ MIN_IO_S = 0.01  # a socket timeout of 0 would mean non-blocking
 
 
 @dataclass(frozen=True)
-class _Result:
+class Result:
     """What step 6 fixed: an error (``None``: sent, with ``http_status``) and how it came about."""
 
     error: ErrorResult | None
@@ -139,12 +153,13 @@ def _facts(
     )
 
 
-def _log(inv: Invocation, config: Config, facts: RunFacts) -> None:
-    """The log step (step 7), after the result was printed and flushed. Never for a dry run or
-    with config ``log`` false; ``write_log_record`` never raises and prints the one fixed warning
-    on any state problem. A run that the outcome rule does not log (exit 1 before the gate reached
-    ``writing``) is skipped there."""
-    if inv.dry_run or not config.log:
+def log_facts(inv: Invocation, config: Config, facts: RunFacts) -> None:
+    """The log step (step 7), after the result was printed and flushed. Never with config ``log``
+    false (the callers that can be a dry run check that before they get here);
+    ``write_log_record`` never raises and prints the one fixed warning on any state problem. A run
+    that the outcome rule does not log (exit 1 before the gate reached ``writing``) is skipped
+    there."""
+    if not config.log:
         return
     gateway = inv.gateway
     before = gateway.monotonic()
@@ -175,10 +190,10 @@ def _log_early(
         duration_ms=duration_ms,
         http_status=None,
     )
-    _log(inv, config, facts)
+    log_facts(inv, config, facts)
 
 
-def _error_facts(inv: Invocation, plan: Plan, result: _Result, error: ErrorResult) -> RunFacts:
+def _error_facts(inv: Invocation, plan: Plan, result: Result, error: ErrorResult) -> RunFacts:
     body = error.envelope["error"]
     details = body["details"] or {}
     status = details.get("http_status")
@@ -194,7 +209,23 @@ def _error_facts(inv: Invocation, plan: Plan, result: _Result, error: ErrorResul
     )
 
 
-def _present(inv: Invocation, config: Config, plan: Plan, result: _Result) -> int:
+def result_facts(inv: Invocation, plan: Plan, result: Result) -> RunFacts:
+    """The log facts of a fixed result (sent, or an error of exit 12)."""
+    if result.error is not None:
+        return _error_facts(inv, plan, result, result.error)
+    return _facts(
+        inv,
+        plan,
+        exit_code=EXIT_OK,
+        unknown_outcome=False,
+        code=None,
+        reason=None,
+        duration_ms=_ms(plan.started, result.fixed_at),
+        http_status=result.http_status,
+    )
+
+
+def _present(inv: Invocation, config: Config, plan: Plan, result: Result) -> int:
     """Print the result (stdout is written and flushed first), then run the log step."""
     error = result.error
     _verbose(inv, "send", result.send_started, result.fixed_at)
@@ -219,21 +250,10 @@ def _present(inv: Invocation, config: Config, plan: Plan, result: _Result) -> in
         if not inv.json and not inv.quiet:
             write_text(sys.stderr, f"sent ({plan.notification.level}, {duration_ms} ms)\n")
         code = EXIT_OK
-        facts = _facts(
-            inv,
-            plan,
-            exit_code=EXIT_OK,
-            unknown_outcome=False,
-            code=None,
-            reason=None,
-            duration_ms=duration_ms,
-            http_status=result.http_status,
-        )
     else:
         emit_error(inv.json, error)
         code = error.exit_code
-        facts = _error_facts(inv, plan, result, error)
-    _log(inv, config, facts)
+    log_facts(inv, config, result_facts(inv, plan, result))
     return code
 
 
@@ -242,7 +262,7 @@ def _is_http(config: Config) -> bool:
     return base is not None and base.scheme == "http"
 
 
-def _internal_after_writing(inv: Invocation, config: Config, plan: Plan, fixed_at: float) -> int:
+def internal_after_writing(inv: Invocation, config: Config, plan: Plan, fixed_at: float) -> int:
     """Exit 1 once the gate reached ``writing``: the one envelope (``unknown_outcome`` true) and,
     best effort, the log record (outcome ``outcome_unknown``, code ``internal``), in that order.
     Nothing is printed twice: what was printed already decides the code and is not logged here."""
@@ -262,20 +282,20 @@ def _internal_after_writing(inv: Invocation, config: Config, plan: Plan, fixed_a
             duration_ms=_ms(plan.started, fixed_at),
             http_status=None,
         )
-        _log(inv, config, facts)
+        log_facts(inv, config, facts)
     except Exception:  # noqa: BLE001 - the log step is best effort
         pass
     return code
 
 
-def _conclude(inv: Invocation, config: Config, plan: Plan, result: _Result) -> int:
+def _conclude(inv: Invocation, config: Config, plan: Plan, result: Result) -> int:
     """Report ``result`` and end the run. A failure while reporting never prints a second
     envelope: what was printed already decides the code."""
     try:
         code = _present(inv, config, plan, result)
     except Exception:  # noqa: BLE001 - nothing of it is printed
         if result.writing:
-            code = _internal_after_writing(inv, config, plan, result.fixed_at)
+            code = internal_after_writing(inv, config, plan, result.fixed_at)
         else:
             done = emitted_exit()
             code = done if done is not None else fail(inv.json, "internal")
@@ -287,8 +307,45 @@ def _conclude(inv: Invocation, config: Config, plan: Plan, result: _Result) -> i
     return finish(inv.gateway, result.verdict, code)
 
 
+class InternalAfterWriting(Exception):  # noqa: N818 - not an error type of the tool's API
+    """``execute`` found a bug after the gate reached ``writing``: the caller reports exit 1 with
+    ``unknown_outcome`` (``internal_after_writing``), then ``finish``es with ``verdict`` when the
+    worker may still run."""
+
+    def __init__(self, fixed_at: float, verdict: Verdict | None) -> None:
+        super().__init__("internal error after writing")
+        self.fixed_at = fixed_at
+        self.verdict = verdict
+
+
 def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
     """Steps 5 to 7: token, POST, result mapping, output and log."""
+    try:
+        result = execute(inv, config, plan, lambda deadline: warn_insecure(inv, config, deadline))
+    except InternalAfterWriting as exc:
+        code = internal_after_writing(inv, config, plan, exc.fixed_at)
+        if exc.verdict is None:
+            return code
+        flush_streams()
+        return finish(inv.gateway, exc.verdict, code)
+    return _conclude(inv, config, plan, result)
+
+
+def warn_insecure(inv: Invocation, config: Config, deadline: float) -> bool:
+    """One line per run, before the first request; --quiet does not suppress it. Not printed when
+    no request is made (the deadline is already used up: ``run_with_deadline`` starts no
+    worker). Returns whether it printed."""
+    if not (_is_http(config) and deadline - inv.gateway.monotonic() > 0):
+        return False
+    write_text(sys.stderr, INSECURE_HTTP_WARNING + "\n")
+    return True
+
+
+def execute(inv: Invocation, config: Config, plan: Plan, warn: Callable[[float], object]) -> Result:
+    """Steps 5 and 6: the token and trust, the POST in the deadline worker and the mapping of its
+    verdict. Prints nothing but the warning (``warn(deadline)``, once per run, just before the
+    worker). A bug after the gate reached ``writing`` is ``InternalAfterWriting``; any other bug
+    is the exception itself (exit 1, not logged)."""
     gateway = inv.gateway
     service = config.service
     if service is None:
@@ -306,8 +363,7 @@ def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
         inv.signals.check()
         spec = classify_exception(exc, Gate.IDLE, op=Op.SEND)
         error = spec.build(tag_sent=plan.tag_set)
-        result = _Result(error, None, False, gateway.monotonic(), send_started, None)
-        return _conclude(inv, config, plan, result)
+        return Result(error, None, False, gateway.monotonic(), send_started, None)
     # connect_timeout never exceeds the time that remains (io_timeout was capped above).
     target = replace(target, connect_timeout=min(target.connect_timeout, left))
 
@@ -318,10 +374,7 @@ def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
     # is the stop path (the gate decides, as at the deadline).
     gate = WritingGate()
     inv.signals.check()
-    # One line per run, before the first request; --quiet does not suppress it. Not printed when
-    # no request is made (the deadline is already used up: ``run_with_deadline`` starts no worker).
-    if _is_http(config) and deadline - gateway.monotonic() > 0:
-        write_text(sys.stderr, INSECURE_HTTP_WARNING + "\n")
+    warn(deadline)
     try:
         verdict = run_with_deadline(
             gateway,
@@ -341,26 +394,38 @@ def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
             gate.settle()
         except Exception:  # noqa: BLE001
             pass
-        if writing:  # exit 1 with unknown_outcome: printed and logged here (best effort)
-            return _internal_after_writing(inv, config, plan, gateway.monotonic())
+        if writing:  # exit 1 with unknown_outcome: printed and logged by the caller (best effort)
+            raise InternalAfterWriting(gateway.monotonic(), None) from None
         raise
     fixed_at = gateway.monotonic()
     writing = verdict.gate is Gate.WRITING
     inv.progress.writing = writing
     outcome = verdict.result
     if isinstance(outcome, Success):
-        result = _Result(None, outcome.http_status, writing, fixed_at, send_started, verdict)
-    else:
-        try:
-            error = verdict.error(tag_sent=plan.tag_set)
-        except Exception:
-            if not writing:
-                raise  # exit 1, not logged: cli prints the fixed message
-            code = _internal_after_writing(inv, config, plan, fixed_at)
-            flush_streams()
-            return finish(gateway, verdict, code)
-        result = _Result(error, None, writing, fixed_at, send_started, verdict)
-    return _conclude(inv, config, plan, result)
+        return Result(None, outcome.http_status, writing, fixed_at, send_started, verdict)
+    try:
+        error = verdict.error(tag_sent=plan.tag_set)
+    except Exception:
+        if not writing:
+            raise  # exit 1, not logged: cli prints the fixed message
+        raise InternalAfterWriting(fixed_at, verdict) from None
+    return Result(error, None, writing, fixed_at, send_started, verdict)
+
+
+def build_plan(
+    config: Config, notification: Notification, dedupe_key: str | None, started: float
+) -> Plan:
+    """Step 4: the tag is derived only when a dedupe key was given; render and serialize."""
+    tag = None if dedupe_key is None else tag_from_dedupe_key(dedupe_key)
+    rendered = render(
+        notification,
+        max_chars=config.max_chars,
+        default_group=config.default_group,
+        level_prefix=config.level_prefix,
+        tag=tag,
+    )
+    body = serialize(rendered.body)
+    return Plan(notification, rendered, body, tag is not None, dedupe_key, started)
 
 
 def _refuse(json_mode: bool, error: ErrorResult) -> int:
@@ -441,16 +506,7 @@ def run_send(inv: Invocation) -> int:
     _verbose(inv, "input", started, after_input)
 
     # Step 4: render. The tag is derived only when a dedupe key was given.
-    tag = None if args.dedupe_key is None else tag_from_dedupe_key(args.dedupe_key)
-    rendered = render(
-        notification,
-        max_chars=config.max_chars,
-        default_group=config.default_group,
-        level_prefix=config.level_prefix,
-        tag=tag,
-    )
-    body = serialize(rendered.body)
-    plan = Plan(notification, rendered, body, tag is not None, args.dedupe_key, started)
+    plan = build_plan(config, notification, args.dedupe_key, started)
     _verbose(inv, "render", after_input, gateway.monotonic())
     signals.check()
     if not inv.dry_run:

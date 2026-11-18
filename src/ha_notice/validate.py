@@ -2,7 +2,7 @@
 
 ``validate [--probe] [--test-message]`` runs checks in a fixed order and stops at the first one
 that fails: ``config``, ``credential``, ``probe`` (only with ``--probe``) and ``test_message``
-(only with ``--test-message``, issue #29). ``ok`` is true only when every printed check is ok; the
+(only with ``--test-message``). ``ok`` is true only when every printed check is ok; the
 exit code is 0, or the exit code of the failing check (``config`` 2, every other check 12).
 
 - A config that cannot be loaded is not a check: it is the ``config_invalid`` envelope (exit 2),
@@ -21,8 +21,16 @@ exit code is 0, or the exit code of the failing check (``config`` 2, every other
   probe starts is exit 128+N with no output; during the probe it is decided like the deadline.
 - No check message contains the token, a header, a URL, a host or any response text.
 
-The ``test_message`` check is issue #29's: ``_test_message_check`` is the seam. Until it lands the
-flag fails closed (exit 1) after the earlier checks, and sends nothing.
+- ``--test-message`` sends the fixed notification (``TEST_TITLE``, ``TEST_MESSAGE``, level info, no
+  link, no dedupe key, so no tag) through the send machinery of ``send.py``: the same validation,
+  render, ``make_target``, ``run_with_deadline`` over ``retry.run_attempts`` with ``op=Op.SEND``
+  (a 429 is retried, a lost connection after the first write never is), response mapping and log
+  step. It has its own deadline, which starts when the check starts. The ``test_message`` check is
+  ok or failed (exit 12 for every failure, with a fixed message that never names the code, a body,
+  a host or the token); a bug is exit 1 ``internal``, with ``unknown_outcome`` once the gate
+  reached ``writing``. The report is printed and flushed first, then the log record is written
+  (``--dry-run`` has no effect: the send is logged unless config ``log`` is false), then
+  ``finish``. A signal before the request is exit 128+N with no output and no log record.
 """
 
 from __future__ import annotations
@@ -33,13 +41,13 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from ha_notice.config import Config, ConfigError, CredentialError, load, token_env_ok
-from ha_notice.deadline import WritingGate, finish, run_with_deadline
+from ha_notice.deadline import Verdict, WritingGate, finish, run_with_deadline
 from ha_notice.hass import RawResponse, TrustError, make_target, probe_once
 from ha_notice.output import (
     EXIT_FAILED,
+    EXIT_INTERNAL,
     EXIT_OK,
     EXIT_USAGE,
-    INSECURE_HTTP_WARNING,
     dumps,
     emit_disabled,
     fail,
@@ -47,13 +55,37 @@ from ha_notice.output import (
     record_emitted,
     write_text,
 )
+from ha_notice.payload import notification_from_flags
 from ha_notice.response import ErrorSpec, Gate, Op, Success, classify_exception
+from ha_notice.send import (
+    InternalAfterWriting,
+    Plan,
+    Result,
+    build_plan,
+    execute,
+    internal_after_writing,
+    log_facts,
+    result_facts,
+    warn_insecure,
+)
 
 if TYPE_CHECKING:
     from ha_notice.cli import Invocation
 
 __all__ = ["Check", "run_validate"]
 
+TEST_TITLE = "ha-notice"
+TEST_LEVEL = "info"
+# A sentence with a space: it is not a companion-app command word (the command-keyword rule), it
+# has no link, and it is ASCII, so the sanitizer leaves it unchanged.
+TEST_MESSAGE = "validate: test message"
+TEST_MESSAGE_OK = (
+    "the notification was sent; delivery is not observable, look at the destination to confirm it"
+)
+TEST_MESSAGE_FAILED = (
+    "the notification was not confirmed as sent; delivery is not observable, "
+    "look at the destination"
+)
 MIN_IO_S = 0.01  # a socket timeout of 0 would mean non-blocking
 CONFIG_MESSAGES = {
     "base_url": "base_url is missing or invalid",
@@ -85,20 +117,17 @@ def _failed(name: str, message: str, exit_code: int) -> Check:
 
 class _Run:
     """What the checks of one run share. The ``insecure_http`` warning is printed once per run,
-    before the first request (the probe now, the test message in #29)."""
+    before the first request (the probe, else the test message)."""
 
     def __init__(self, inv: Invocation, config: Config) -> None:
         self.inv = inv
         self.config = config
         self.warned = False
+        self.sent: tuple[Plan, Result] | None = None  # the test message, once it was attempted
 
     def warn_insecure(self, deadline: float) -> None:
-        base = self.config.base_url
-        if self.warned or base is None or base.scheme != "http":
-            return
-        if deadline - self.inv.gateway.monotonic() > 0:  # a request will be made
-            self.warned = True
-            write_text(sys.stderr, INSECURE_HTTP_WARNING + "\n")
+        if not self.warned:
+            self.warned = warn_insecure(self.inv, self.config, deadline)
 
 
 # --- the checks -----------------------------------------------------------------------------
@@ -199,15 +228,51 @@ def _probe_check(run: _Run) -> tuple[Check, Callable[[], int] | None]:
     return check, None
 
 
-def _test_message_check(run: _Run) -> Check:
-    """The ``test_message`` check (``--test-message``).
+class _Ended(Exception):  # noqa: N818 - control flow inside this module
+    """The run ended inside the test message step with ``code`` (exit 1 after the gate reached
+    ``writing``: the envelope was printed and the log record written by ``send``). ``verdict`` is
+    the worker's verdict when it may still run."""
 
-    TODO(#29): send the test message through the normal render and send path (level info, title
-    ``ha-notice``, message ``validate: test message``, no dedupe key, no tag), log it like a send,
-    use ``run.warn_insecure`` before its request, start its deadline here, and return the check
-    (a failure carries exit 12 and says that delivery is not observable). Until then the flag
-    fails closed: exit 1 ``internal``, nothing sent."""
-    raise NotImplementedError("--test-message is not implemented")
+    def __init__(self, code: int, verdict: Verdict | None) -> None:
+        super().__init__("validate ended")
+        self.code = code
+        self.verdict = verdict
+
+
+def _test_message_check(run: _Run) -> tuple[Check, Callable[[], int] | None]:
+    """The ``test_message`` check (``--test-message``): the fixed notification through
+    ``send.execute``. Returns the check and, when the worker may still run, the ``finish`` step;
+    ``run.sent`` is what the log step needs once the report is printed."""
+    inv, config = run.inv, run.config
+    gateway = inv.gateway
+    started = gateway.monotonic()
+    notification = notification_from_flags(
+        title=TEST_TITLE,
+        message=TEST_MESSAGE,
+        level=TEST_LEVEL,
+        link=None,
+        link_hosts=config.link_hosts,
+    )
+    plan = build_plan(config, notification, None, started)
+    inv.signals.check()
+    try:
+        result = execute(inv, config, plan, run.warn_insecure)
+    except InternalAfterWriting as exc:
+        raise _Ended(internal_after_writing(inv, config, plan, exc.fixed_at), exc.verdict) from None
+    error = result.error
+    if error is not None and error.exit_code == EXIT_INTERNAL:
+        if result.writing:  # the request may have been sent: one envelope, and the log record
+            raise _Ended(internal_after_writing(inv, config, plan, result.fixed_at), result.verdict)
+        raise RuntimeError("internal test message failure")  # a bug before writing: cli prints it
+    run.sent = (plan, result)
+    if error is None:
+        check = _passed("test_message", TEST_MESSAGE_OK)
+    else:
+        check = _failed("test_message", TEST_MESSAGE_FAILED, EXIT_FAILED)
+    verdict = result.verdict
+    if verdict is not None and verdict.worker_may_run:
+        return check, lambda: finish(gateway, verdict, check.exit_code)
+    return check, None
 
 
 # --- output ---------------------------------------------------------------------------------
@@ -264,9 +329,32 @@ def run_validate(inv: Invocation) -> int:
             api_ok = check.ok
         if all(c.ok for c in checks) and args.test_message:
             signals.check()
-            checks.append(_test_message_check(run))
-    code = _report(inv, config, checks, api_ok)
+            try:
+                check, pending_finish = _test_message_check(run)
+            except _Ended as ended:
+                return _end(inv, ended.code, ended.verdict)
+            checks.append(check)
+    try:
+        code = _report(inv, config, checks, api_ok)
+    except Exception:
+        if run.sent is not None and run.sent[1].writing:  # the message may be out: say so
+            plan, result = run.sent
+            done = internal_after_writing(inv, config, plan, result.fixed_at)
+            return _end(inv, done, result.verdict)
+        raise
+    if run.sent is not None:  # the log step: after the report was printed and flushed
+        plan, result = run.sent
+        log_facts(inv, config, result_facts(inv, plan, result))
     if pending_finish is not None:
         flush_streams()
         return pending_finish()
     return code
+
+
+def _end(inv: Invocation, code: int, verdict: Verdict | None) -> int:
+    """End the run after ``send`` printed its envelope (and logged): ``finish`` when the worker may
+    still run."""
+    if verdict is None:
+        return code
+    flush_streams()
+    return finish(inv.gateway, verdict, code)
