@@ -393,8 +393,6 @@ def _grammar_ok(key: str, value: Any) -> bool:
         return group_ok(value)
     if key == "level_prefix":
         return all(prefix_ok(v) for v in value.values())
-    if key == "link_hosts":
-        return 1 <= len(value) <= LINK_HOSTS_MAX and all(link_host_entry_ok(v) for v in value)
     if key == "base_url":
         return parse_base_url(value) is not None
     if key == "service":
@@ -403,6 +401,8 @@ def _grammar_ok(key: str, value: Any) -> bool:
         return token_env_ok(value)
     if key == "ca_file":
         return ca_file_ok(value)
+    if key == "link_hosts":
+        return 1 <= len(value) <= LINK_HOSTS_MAX and all(link_host_entry_ok(v) for v in value)
     return True
 
 
