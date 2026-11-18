@@ -166,7 +166,10 @@ def test_the_exception_carries_no_key_name(home: Path, name: str) -> None:
 # --- the key reaches no output ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize("command", [["send", "--message", "hi"], ["validate"], ["send", "--dry-run", "--message", "hi"]])
+COMMANDS = [["send", "--message", "hi"], ["validate"], ["send", "--dry-run", "--message", "hi"]]
+
+
+@pytest.mark.parametrize("command", COMMANDS)
 @pytest.mark.parametrize("as_json", [True, False])
 def test_the_name_is_in_no_stream_or_log(
     home: Path, capsys: pytest.CaptureFixture[str], command: list[str], as_json: bool
@@ -186,7 +189,9 @@ def test_the_name_is_in_no_stream_or_log(
         assert body["error"]["details"] == {"key": "?"}
 
 
-def test_the_name_in_a_drop_in_is_in_no_stream(home: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_name_in_a_drop_in_is_in_no_stream(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     main_file(home).write_text(BASE, encoding="utf-8")
     drop = home / ".config" / "ha-notice" / "config.d" / "10-extra.yaml"
     drop.write_text(f"{FAKE}: 1\n", encoding="utf-8")

@@ -15,8 +15,8 @@ Rules kept here (docs/interface.md, Config):
 - Any failure to read or parse a file (also ``RecursionError`` and ``MemoryError``) is
   ``ConfigError`` whose key is the file path; the YAML error text, which quotes the file, is
   never kept, not even as ``__cause__``.
-- An unknown key is refused before its value is examined, and reported as ``?``, never by name (it may be
-  a secret pasted as a key).
+- An unknown key is refused before its value is examined, and reported as ``?``, never by name
+  (it may be a secret pasted as a key).
 - The type of each known key is checked first, then its grammar and range (issue #9):
   durations (``(0|[1-9][0-9]*)(\\.[0-9]+)?(ms|s|m)?`` of at most 64 characters, or a finite number
   of seconds, compared exactly in ``Fraction``s, so ``1e3``, ``1:30``, ``.nan`` and a bool are
