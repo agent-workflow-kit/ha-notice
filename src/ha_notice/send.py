@@ -331,15 +331,17 @@ def deliver(inv: Invocation, config: Config, plan: Plan) -> int:
     return _conclude(inv, config, plan, result)
 
 
-def warn_insecure(inv: Invocation, config: Config, deadline: float) -> None:
+def warn_insecure(inv: Invocation, config: Config, deadline: float) -> bool:
     """One line per run, before the first request; --quiet does not suppress it. Not printed when
     no request is made (the deadline is already used up: ``run_with_deadline`` starts no
-    worker)."""
-    if _is_http(config) and deadline - inv.gateway.monotonic() > 0:
-        write_text(sys.stderr, INSECURE_HTTP_WARNING + "\n")
+    worker). Returns whether it printed."""
+    if not (_is_http(config) and deadline - inv.gateway.monotonic() > 0):
+        return False
+    write_text(sys.stderr, INSECURE_HTTP_WARNING + "\n")
+    return True
 
 
-def execute(inv: Invocation, config: Config, plan: Plan, warn: Callable[[float], None]) -> Result:
+def execute(inv: Invocation, config: Config, plan: Plan, warn: Callable[[float], object]) -> Result:
     """Steps 5 and 6: the token and trust, the POST in the deadline worker and the mapping of its
     verdict. Prints nothing but the warning (``warn(deadline)``, once per run, just before the
     worker). A bug after the gate reached ``writing`` is ``InternalAfterWriting``; any other bug

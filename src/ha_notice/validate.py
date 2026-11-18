@@ -48,7 +48,6 @@ from ha_notice.output import (
     EXIT_INTERNAL,
     EXIT_OK,
     EXIT_USAGE,
-    INSECURE_HTTP_WARNING,
     dumps,
     emit_disabled,
     fail,
@@ -67,6 +66,7 @@ from ha_notice.send import (
     internal_after_writing,
     log_facts,
     result_facts,
+    warn_insecure,
 )
 
 if TYPE_CHECKING:
@@ -126,12 +126,8 @@ class _Run:
         self.sent: tuple[Plan, Result] | None = None  # the test message, once it was attempted
 
     def warn_insecure(self, deadline: float) -> None:
-        base = self.config.base_url
-        if self.warned or base is None or base.scheme != "http":
-            return
-        if deadline - self.inv.gateway.monotonic() > 0:  # a request will be made
-            self.warned = True
-            write_text(sys.stderr, INSECURE_HTTP_WARNING + "\n")
+        if not self.warned:
+            self.warned = warn_insecure(self.inv, self.config, deadline)
 
 
 # --- the checks -----------------------------------------------------------------------------

@@ -1044,6 +1044,67 @@ def test_an_exception_from_the_deadline_after_writing_is_exit_1_logged_once(
     assert_logged_internal(rig)
 
 
+def test_a_thread_start_failure_after_writing_records_writing_and_settles_the_gate(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def writing_then_raise(gateway: Any, attempt: Any, **kw: Any) -> Any:
+        seen["gate"] = kw["gate"]
+        kw["gate"].enter_writing()
+        raise RuntimeError("can't start new thread")
+
+    real = send_module.internal_after_writing
+
+    def spy(inv: Any, config: Any, plan: Any, fixed_at: float) -> int:
+        seen["writing"] = inv.progress.writing
+        seen["settled"] = seen["gate"].abandoned()
+        return real(inv, config, plan, fixed_at)
+
+    monkeypatch.setattr(send_module, "run_with_deadline", writing_then_raise)
+    monkeypatch.setattr(send_module, "internal_after_writing", spy)
+    code, _, _ = rig.run(["--json", "send", "--message=hi"])
+    assert code == 1
+    assert seen["writing"] is True
+    assert seen["settled"] is True
+
+
+def test_a_bug_in_the_verdict_after_writing_flushes_logs_then_finishes_with_the_verdict(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(self: Any, *, tag_sent: bool) -> Any:
+        raise ValueError("a bug between the verdict and the report")
+
+    events: list[str] = []
+    finished: list[Any] = []
+    real_log, real_flush = send_module.log_facts, send_module.flush_streams
+
+    def log_spy(*args: Any) -> None:
+        events.append("log")
+        real_log(*args)
+
+    def flush_spy() -> None:
+        events.append("flush")
+        real_flush()
+
+    def finish_spy(gateway: Any, verdict: Any, code: int) -> int:
+        events.append("finish")
+        finished.append((verdict, code))
+        return code
+
+    monkeypatch.setattr(deadline.Verdict, "error", broken)
+    monkeypatch.setattr(send_module, "log_facts", log_spy)
+    monkeypatch.setattr(send_module, "flush_streams", flush_spy)
+    monkeypatch.setattr(send_module, "finish", finish_spy)
+    rig.gw.default_script = _row(401)
+    code, _, _ = rig.run(["--json", "send", "--message=hi"])
+    assert code == 1
+    assert events[-3:] == ["log", "flush", "finish"]
+    assert len(finished) == 1 and isinstance(finished[0][0], deadline.Verdict)
+    assert finished[0][1] == 1
+    assert len(rig.records()) == 1
+
+
 def test_an_exception_from_the_deadline_while_idle_is_not_logged(
     rig: Rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
