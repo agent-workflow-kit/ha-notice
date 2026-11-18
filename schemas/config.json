@@ -13,7 +13,7 @@
       "type": "string",
       "maxLength": 2048,
       "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://(?:[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*|\\[[0-9A-Fa-f:.]+\\])(?::(?!0+(?![0-9]))(?:[0-9]{1,4}|0[0-9]{4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:/(?!\\.{1,2}(?:/|(?![\\s\\S])))[A-Za-z0-9._~-]+)*/*(?![\\s\\S])",
-      "description": "https://host[:port][/prefix] (one trailing slash run allowed, removed by the tool); http:// only with allow_insecure_http: true. No userinfo, query, fragment, empty or dot segment; non-ASCII hosts as punycode. The port is a number from 1 to 65535, written with at most 5 digits (leading zeros allowed, kept as written)."
+      "description": "https://host[:port][/prefix] (one trailing slash run allowed, removed by the tool); http:// only with allow_insecure_http: true. No userinfo, query, fragment, empty or dot segment; non-ASCII hosts as punycode. The port is a number from 1 to 65535, written with at most 5 digits (leading zeros allowed, kept as written). The tool also requires the text between brackets of an IPv6 host to be a valid IPv6 address; the pattern is looser."
     },
     "service": {
       "type": "string",
@@ -33,7 +33,7 @@
     "ca_file": {
       "type": "string",
       "pattern": "^/[^\\u0000-\\u001f\\u007f]{0,4095}(?![\\s\\S])",
-      "description": "Extra CA bundle, an absolute path (no ~). The tool checks that it is readable. Added to a non-empty default trust; the whole trust when the default trust is empty."
+      "description": "Extra CA bundle, an absolute path (no ~). The tool checks that it is a readable regular file of at most 4 MiB. Added to a non-empty default trust; the whole trust when the default trust is empty."
     },
     "link_hosts": {
       "type": "array",
