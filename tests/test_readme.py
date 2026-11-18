@@ -261,6 +261,17 @@ def test_readme_has_links() -> None:
     assert len(_local_links(README)) > 10
 
 
+def _has_pending_marker(text: str) -> bool:
+    return any(
+        line.startswith("<!-- TODO(#33):") and line.endswith("-->") for line in text.splitlines()
+    )
+
+
 def test_readme_keeps_the_pending_automation_marker() -> None:
     # Remove this test and the marker in README.md together when #33 lands.
-    assert "<!-- TODO(#33):" in README.read_text(encoding="utf-8"), "remove with #33"
+    assert _has_pending_marker(README.read_text(encoding="utf-8")), "remove with #33"
+
+
+def test_pending_marker_must_be_a_whole_comment_line() -> None:
+    assert not _has_pending_marker("text <!-- TODO(#33): x -->")
+    assert not _has_pending_marker("<!-- TODO(#33): unterminated")
