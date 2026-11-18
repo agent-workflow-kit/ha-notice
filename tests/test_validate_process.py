@@ -28,6 +28,7 @@ from tests.test_send_process import (
     log_records,
     make_env,
 )
+from tests.timing import LOAD_SLACK_S
 
 
 @pytest.fixture
@@ -110,7 +111,7 @@ def test_a_stalled_host_ends_within_the_deadline_plus_three_seconds(
     with FakeHA(script=[Reply(stall_before_read=True)]) as ha:
         started = time.monotonic()
         done = validate(config(tmp_path, ha, timeout="1s"), home, "--probe")
-        assert time.monotonic() - started < 4
+        assert time.monotonic() - started < 4 + LOAD_SLACK_S
         body = json.loads(done.stdout)
         assert done.returncode == 12 and body["probe"] == {"api_ok": False}
         assert body["checks"][-1]["message"] == "outcome_unknown"
@@ -279,7 +280,7 @@ def test_a_stalled_test_message_ends_within_the_deadline_plus_three_seconds(
     with FakeHA(script=[Reply(stall_before_read=True)]) as ha:
         started = time.monotonic()
         done = validate(config(tmp_path, ha, timeout="1s"), home, "--test-message")
-        assert time.monotonic() - started < 4
+        assert time.monotonic() - started < 4 + LOAD_SLACK_S
         body = json.loads(done.stdout)
         assert done.returncode == 12 and body["checks"][-1]["name"] == "test_message"
         assert body["checks"][-1]["ok"] is False

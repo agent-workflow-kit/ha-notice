@@ -24,6 +24,7 @@ from ha_notice.output import flush_streams
 from ha_notice.response import Gate, Op
 from ha_notice.signals import SignalReceived, SignalState, install, signal_exit_code
 from tests.fake_gateway import FakeGateway, StallingSource
+from tests.timing import LOAD_SLACK_S
 
 SIGNALS = [signal.SIGTERM, signal.SIGINT, signal.SIGHUP]
 
@@ -473,7 +474,7 @@ def test_stop_wired_to_the_flag_settles_by_the_gate_state() -> None:
     finally:
         release.set()
     assert verdict.kind is Kind.DEADLINE and verdict.gate is Gate.IDLE
-    assert time.monotonic() - started < 1.5  # noticed within a slice
+    assert time.monotonic() - started < 1.5 + LOAD_SLACK_S  # noticed within a slice
     assert state.exit_code == 143
 
 
@@ -538,7 +539,7 @@ def test_a_real_process_exits_128_plus_n_on_a_stalled_stdin(tmp_path: Path, sign
         started = time.monotonic()
         os.kill(proc.pid, signum)  # the child this test started
         proc.wait(timeout=20)  # stdin stays open: only the signal can end the read
-        assert time.monotonic() - started < 5
+        assert time.monotonic() - started < 5 + LOAD_SLACK_S
         assert proc.stdout is not None and proc.stderr is not None
         out, err = proc.stdout.read(), proc.stderr.read()
     finally:

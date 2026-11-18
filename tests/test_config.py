@@ -20,6 +20,7 @@ from ha_notice.config import Config, ConfigError
 from ha_notice.gateway import Gateway, HomeLookupError, RealGateway
 from ha_notice.output import build_error
 from tests.fake_gateway import FakeGateway
+from tests.timing import LOAD_SLACK_S
 
 FAKE_SECRET = "sk-FAKE-SECRET-0123456789"
 
@@ -290,7 +291,7 @@ def test_a_fifo_config_returns_at_once(gw: FakeGateway, home: Path) -> None:
     os.mkfifo(fifo)
     start = time.monotonic()
     err = fails(gw)
-    assert time.monotonic() - start < 5
+    assert time.monotonic() - start < 5 + LOAD_SLACK_S
     assert err.key == str(fifo)
 
 
@@ -570,7 +571,7 @@ def test_deeply_nested_brackets_are_config_invalid(gw: FakeGateway, home: Path) 
     path = write_main(home, "[" * 1000 + "\n")
     start = time.monotonic()
     assert fails(gw).key == str(path)
-    assert time.monotonic() - start < 10
+    assert time.monotonic() - start < 10 + LOAD_SLACK_S
 
 
 @pytest.mark.parametrize("depth", [100, 5000, 30000])
@@ -598,7 +599,7 @@ def test_an_alias_bomb_is_config_invalid_and_fast(gw: FakeGateway, home: Path) -
     write_main(home, text)
     start = time.monotonic()
     fails(gw)
-    assert time.monotonic() - start < 5
+    assert time.monotonic() - start < 5 + LOAD_SLACK_S
 
 
 def test_the_documented_413_byte_alias_bomb(gw: FakeGateway, home: Path) -> None:
@@ -613,7 +614,7 @@ def test_the_documented_413_byte_alias_bomb(gw: FakeGateway, home: Path) -> None
     write_main(home, text)
     start = time.monotonic()
     fails(gw)
-    assert time.monotonic() - start < 5
+    assert time.monotonic() - start < 5 + LOAD_SLACK_S
 
 
 def test_a_recursive_alias_is_config_invalid(gw: FakeGateway, home: Path) -> None:

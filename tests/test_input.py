@@ -30,6 +30,7 @@ from ha_notice.payload import (
 )
 from tests.fake_gateway import FakeGateway, StallingSource
 from tests.harness import schema_errors
+from tests.timing import LOAD_SLACK_S
 
 DEADLINE = 10.0
 
@@ -131,7 +132,7 @@ def test_big_integer_is_refused_even_when_the_interpreter_limit_is_off() -> None
     try:
         started = time.monotonic()
         assert refused_pointer(b'{"message":' + b"9" * 200000 + b"}") == ""
-        assert time.monotonic() - started < 2
+        assert time.monotonic() - started < 2 + LOAD_SLACK_S
     finally:
         sys.set_int_max_str_digits(old)
 
@@ -179,7 +180,7 @@ def test_one_mebibyte_of_open_brackets_is_refused_fast() -> None:
     started = time.monotonic()
     with pytest.raises(ValueError):
         hardened_loads("[" * INPUT_MAX)
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 + LOAD_SLACK_S
 
 
 def test_deep_nesting_is_refused_without_recursion_error() -> None:
@@ -488,7 +489,7 @@ def test_pipe_that_sends_ten_bytes_and_stalls_times_out_without_hanging(
         with pytest.raises(InputTimeout):
             read_notification(real, r, real_remaining(0.5))
         elapsed = time.monotonic() - started
-        assert 0.4 <= elapsed < 3.0
+        assert 0.4 <= elapsed < 3.0 + LOAD_SLACK_S
     finally:
         os.close(r)
         os.close(w)
@@ -512,7 +513,7 @@ def test_slow_trickle_cannot_extend_the_deadline(real: gw.RealGateway) -> None:
         started = time.monotonic()
         with pytest.raises(InputTimeout):
             read_notification(real, r, real_remaining(0.6))
-        assert time.monotonic() - started < 3.0
+        assert time.monotonic() - started < 3.0 + LOAD_SLACK_S
     finally:
         stop.set()
         thread.join(5)

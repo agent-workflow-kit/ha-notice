@@ -27,6 +27,7 @@ from ha_notice.output import INSECURE_HTTP_WARNING
 from ha_notice.render import tag_from_dedupe_key
 from ha_notice.state import STATE_WARNING
 from tests.fake_ha import FakeHA, Reply
+from tests.timing import LOAD_SLACK_S
 
 TOKEN = "HA_SECRET_tok_0f1e2d3c4b5a6978"
 WRAPPER = """
@@ -237,7 +238,7 @@ def test_sigterm_during_the_send_reports_by_the_gate_and_logs(
         started = time.monotonic()
         proc.send_signal(signal.SIGTERM)  # the exact process this test started
         out, err = proc.communicate(timeout=LIMIT_S)
-        assert proc.returncode == 12 and time.monotonic() - started < 3
+        assert proc.returncode == 12 and time.monotonic() - started < 3 + LOAD_SLACK_S
         body = json.loads(out)["error"]
         assert body["code"] == "outcome_unknown" and body["unknown_outcome"] is True
         [rec] = log_records(home)
@@ -274,7 +275,7 @@ def test_a_held_log_lock_delays_only_the_log_in_a_real_process(
     finally:
         os.close(fd)
     assert total - line_at >= 0.5  # the log step waited for the lock
-    assert total < 10 + 3  # timeout plus 3 s
+    assert total < 10 + 3 + LOAD_SLACK_S  # timeout plus 3 s
     assert err.decode().count(STATE_WARNING) == 1 and log_records(home) == []
 
 

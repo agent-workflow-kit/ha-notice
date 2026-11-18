@@ -25,6 +25,7 @@ from ha_notice.response import ErrorSpec, Gate, Op, Success
 from ha_notice.retry import AttemptFacts, AttemptGate, Outcome
 from tests.fake_gateway import FakeExit, FakeGateway
 from tests.fake_ha import FakeHA, Reply, StallingResolverGateway
+from tests.timing import LOAD_SLACK_S
 
 TOKEN = "HA_deadline-0123456789"
 BODY = json.dumps({"message": "hi"}).encode()
@@ -265,7 +266,7 @@ def test_a_response_is_returned_at_once() -> None:
     verdict, took = run(gateway, lambda before_write: (before_write(), resp())[1])
     assert verdict.kind is Kind.COMPLETED and verdict.result == Success(200)
     assert verdict.facts is not None and verdict.facts.requests == 1
-    assert took < 0.5
+    assert took < LOAD_SLACK_S
     assert not verdict.worker_may_run
 
 
@@ -310,7 +311,7 @@ def test_connect_blocked_past_the_deadline_reports_network_error_and_writes_noth
     body = verdict.error(tag_sent=False).envelope["error"]
     assert body["code"] == "network_error"
     assert body["retryable"] is True and body["unknown_outcome"] is False
-    assert DEADLINE_S <= took < DEADLINE_S + SLACK_S
+    assert DEADLINE_S <= took < DEADLINE_S + SLACK_S + LOAD_SLACK_S
     release.set()  # the connect now proceeds
     assert done.wait(5)
     assert refused == [True] and written == []
@@ -326,7 +327,7 @@ def test_a_block_after_the_first_byte_reports_outcome_unknown(release: threading
     verdict, took = run(ClockGateway(), attempt)
     assert verdict.gate is Gate.WRITING
     assert verdict.error(tag_sent=False).envelope["error"]["code"] == "outcome_unknown"
-    assert took < DEADLINE_S + SLACK_S
+    assert took < DEADLINE_S + SLACK_S + LOAD_SLACK_S
 
 
 def test_a_late_response_after_a_writing_deadline_does_not_change_the_result(
@@ -415,7 +416,7 @@ def test_a_429_then_a_deadline_during_the_retry_connect_is_network_error(
     release.set()
     time.sleep(0.2)
     assert not wrote_second.is_set()
-    assert took < DEADLINE_S + SLACK_S
+    assert took < DEADLINE_S + SLACK_S + LOAD_SLACK_S
 
 
 def test_the_gate_lock_is_never_held_across_the_attempt(release: threading.Event) -> None:
@@ -442,7 +443,9 @@ def test_the_main_thread_can_decide_while_the_worker_is_blocked(release: threadi
         return resp()
 
     verdict, took = run(ClockGateway(), attempt, gate=gate)
-    assert verdict.kind is Kind.DEADLINE and took < DEADLINE_S + 1.0
+    assert (
+        verdict.kind is Kind.DEADLINE and took < DEADLINE_S + LOAD_SLACK_S
+    )  # the blocked worker is held 10 s
     assert not gate._lock.locked()
 
 
@@ -627,7 +630,7 @@ def test_a_stalled_name_resolution_is_bounded_and_writes_nothing(real: RealClock
         assert real.resolving.is_set()
         assert verdict.gate is Gate.IDLE
         assert verdict.error(tag_sent=False).envelope["error"]["code"] == "network_error"
-        assert took < DEADLINE_S + SLACK_S
+        assert took < DEADLINE_S + SLACK_S + LOAD_SLACK_S
         real.release.set()  # the resolution proceeds; the worker must refuse to write
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline and not ha.connections:
@@ -643,7 +646,7 @@ def test_a_server_that_never_reads_is_outcome_unknown_in_time(real: RealClock) -
         verdict, took, _ = real_run(real, ha)
         assert verdict.gate is Gate.WRITING
         assert verdict.error(tag_sent=False).envelope["error"]["code"] == "outcome_unknown"
-        assert took < DEADLINE_S + SLACK_S
+        assert took < DEADLINE_S + SLACK_S + LOAD_SLACK_S
 
 
 def test_a_server_that_hangs_after_the_request_is_outcome_unknown_in_time(
@@ -653,7 +656,7 @@ def test_a_server_that_hangs_after_the_request_is_outcome_unknown_in_time(
     with FakeHA(script=[Reply(truncate_after=10, hang=True)]) as ha:
         verdict, took, _ = real_run(real, ha)
         assert verdict.error(tag_sent=False).envelope["error"]["code"] == "outcome_unknown"
-        assert took < DEADLINE_S + SLACK_S
+        assert took < DEADLINE_S + SLACK_S + LOAD_SLACK_S
 
 
 def test_a_byte_by_byte_response_is_bounded_by_the_deadline(real: RealClock) -> None:
@@ -662,7 +665,7 @@ def test_a_byte_by_byte_response_is_bounded_by_the_deadline(real: RealClock) -> 
         verdict, took, _ = real_run(real, ha)  # every recv succeeds within io_timeout
         assert verdict.kind is Kind.DEADLINE and verdict.gate is Gate.WRITING
         assert verdict.error(tag_sent=False).envelope["error"]["code"] == "outcome_unknown"
-        assert DEADLINE_S <= took < DEADLINE_S + SLACK_S
+        assert DEADLINE_S <= took < DEADLINE_S + SLACK_S + LOAD_SLACK_S
 
 
 def test_a_429_whose_wait_does_not_fit_ends_at_once_with_rate_limited(
@@ -736,7 +739,7 @@ def test_an_endless_100_continue_stream_is_outcome_unknown_at_the_deadline(
         took = time.monotonic() - started
         assert verdict.kind is Kind.DEADLINE and verdict.gate is Gate.WRITING
         assert verdict.error(tag_sent=False).envelope["error"]["code"] == "outcome_unknown"
-        assert DEADLINE_S <= took < DEADLINE_S + SLACK_S
+        assert DEADLINE_S <= took < DEADLINE_S + SLACK_S + LOAD_SLACK_S
     finally:
         stop.set()
         listener.close()

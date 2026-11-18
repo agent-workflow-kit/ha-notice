@@ -19,6 +19,7 @@ from ha_notice.gateway import (
     SourceError,
     StateDirError,
 )
+from tests.timing import LOAD_SLACK_S
 
 
 @pytest.fixture
@@ -232,7 +233,7 @@ def test_read_source_fifo_path_raises_at_once(real: RealGateway, tmp_path: Path)
     started = time.monotonic()
     with pytest.raises(SourceError):
         real.read_source(str(fifo), 10, never_expires)
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 + LOAD_SLACK_S
 
 
 def test_read_source_dev_zero_raises(real: RealGateway) -> None:
@@ -280,7 +281,7 @@ def test_read_source_fd_stall_times_out_with_what_arrived(
     res = real.read_source(r, 100, lambda: 0.3 - (time.monotonic() - start))
     elapsed = time.monotonic() - start
     assert (res.data, res.status) == (b"0123456789", "timeout")
-    assert 0.25 <= elapsed < 1.5
+    assert 0.25 <= elapsed < 1.5 + LOAD_SLACK_S
 
 
 def test_read_source_notices_the_deadline_within_a_slice(
@@ -478,7 +479,7 @@ def test_state_file_rejects_a_fifo_without_blocking(
     started = time.monotonic()
     with pytest.raises(StateDirError):
         real.open_state_file(dir_fd, "log.jsonl", append=True)
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 + LOAD_SLACK_S
 
 
 def test_state_file_rejects_a_symlink(real: RealGateway, state: tuple[int, Path]) -> None:

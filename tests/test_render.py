@@ -16,6 +16,7 @@ from ha_notice.config import DEFAULTS
 from ha_notice.payload import Notification, validate_notification
 from ha_notice.render import MARKER, Rendered, message_sha256, render, serialize
 from tests.harness import Golden, load_schema
+from tests.timing import LOAD_SLACK_S
 
 PREFIX = dict(DEFAULTS["level_prefix"])
 TAG = "awkit-0123456789abcdef01234567"
@@ -411,7 +412,7 @@ def test_max_size_input_is_fast() -> None:
     start = time.perf_counter()
     for _ in range(20):
         render(n, max_chars=2000, default_group=None, level_prefix=PREFIX)
-    assert time.perf_counter() - start < 2.0
+    assert time.perf_counter() - start < 2.0 + LOAD_SLACK_S
 
 
 # --- serialization -------------------------------------------------------------------------

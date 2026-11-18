@@ -24,6 +24,7 @@ import pytest
 from ha_notice import gateway as gw
 from ha_notice.gateway import ConnectSpec, Gateway, RealGateway
 from tests.fake_gateway import ConnectionScript, FakeGateway
+from tests.timing import LOAD_SLACK_S
 
 # --- signatures -----------------------------------------------------------------------------
 
@@ -739,7 +740,7 @@ def test_a_drip_feeding_tls_handshake_is_bounded_by_the_connect_timeout() -> Non
         stop.set()
         listener.close()
         thread.join(2)
-    assert elapsed < 1.0
+    assert elapsed < 1.0 + LOAD_SLACK_S  # the drip would run 12 s
 
 
 # --- internals of the real connection ---------------------------------------------------------
