@@ -58,6 +58,7 @@ def test_valid_object_is_validated() -> None:
 
 
 def test_json_whitespace_and_escapes_accepted() -> None:
+    # The escaped LF is trailing whitespace, which the sanitizer (step 4) removes.
     assert parse_notification(b' \t\r\n{"message":"a\\u00e9\\n"}\n').message == "a\u00e9"
 
 
