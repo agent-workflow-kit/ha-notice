@@ -73,5 +73,6 @@ Implements [interface.md](interface.md) and [design.md](design.md). The issues f
 
 - **0.x**: Stages 0 to 4.
 - **1.0** when the live suite has passed and the tool has run in daily use through a routing tool for two weeks without an interface change.
-- **1.x, additive**: per-level `data` keys (`importance`, `channel`, `ttl`, `priority`, `push`) after a live phone test, `--service` or `--group` flags if a router needs them, notification actions with allowlisted URI schemes, notification replacement and clearing by tag (`clear_notification` through a dedicated command, never through `message`), non-companion notify services.
+- **0.26, done**: notification `actions` (URI actions on the link rule's schemes, JSON only, at most 3).
+- **1.x, additive**: per-level `data` keys (`importance`, `channel`, `ttl`, `priority`, `push`) after a live phone test, `--service` or `--group` flags if a router needs them, notification replacement and clearing by tag (`clear_notification` through a dedicated command, never through `message`), non-companion notify services.
 - **2.0**: nothing planned.

@@ -51,7 +51,7 @@ To pin a release, append `@v<version>` (a tag from the repository's releases) to
 
 ## Sending
 
-A notification has a `title` (optional), a `message` (required), a `level` (`info`, `warn`, `action` or `error`, default `info`) and an optional `link`. Exactly one input source is used.
+A notification has a `title` (optional), a `message` (required), a `level` (`info`, `warn`, `action` or `error`, default `info`) an optional `link` and optional `actions` (JSON only, see [Actions](#actions)). Exactly one input source is used.
 
 From flags, meant for humans:
 
@@ -86,6 +86,17 @@ With `--json` the same request appears under `rendered`:
 $ echo '{"title":"Build","message":"Finished","level":"warn","link":"https://ci.example.org/run/1"}' | ha-notice --json --dry-run send --stdin-json
 {"outcome":"dry_run","tool":"ha-notice","level":"warn","truncated":false,"bytes":135,"duration_ms":0,"http_status":null,"tag_set":false,"dedupe_key":null,"warnings":[],"rendered":{"title":"WARN: Build","message":"Finished","data":{"url":"https://ci.example.org/run/1","clickAction":"https://ci.example.org/run/1"}}}
 ```
+
+### Actions
+
+`actions` is an optional list of at most 3 buttons for the notification, each an object with a `title` and a `uri`. It exists in JSON input only (stdin or `--file`); there is no flag for it, because untrusted text must not travel in argv. The companion app shows the buttons in the order given and opens the `uri` when one is tapped.
+
+```console
+$ echo '{"title":"Deploy","message":"Finished","level":"action","actions":[{"title":"Open dashboard","uri":"https://ci.example.org/run/1"},{"title":"Logs","uri":"https://ci.example.org/run/1/logs"}]}' | ha-notice --dry-run send --stdin-json
+{"title":"ACTION: Deploy","message":"Finished","data":{"actions":[{"action":"URI","title":"Open dashboard","uri":"https://ci.example.org/run/1"},{"action":"URI","title":"Logs","uri":"https://ci.example.org/run/1/logs"}]}}
+```
+
+The `title` is sanitized like a notification title and must be 1 to 64 characters after that. The `uri` follows the same rule as `link` (printable ASCII, `http` or `https` only, no userinfo, at most 1024 characters) and the same `link_hosts` restriction. Nothing is cut or fixed: a fourth action, an unknown key, a title that is empty or too long and a `uri` with another scheme (`app://`, `javascript:`, `intent:`, `homeassistant://`, `tel:`, a relative path) are refused with exit 20, and `details.pointer` names the place (`/actions`, `/actions/1/title`, `/actions/0/uri`). A command-looking action title is not a command: only the `message` is ever read by the phone as one. See [Notification](docs/interface.md#notification).
 
 ### Levels and prefix
 
