@@ -476,7 +476,11 @@ def test_a_signal_at_the_start_of_clear_is_128_plus_n_and_unlogged(
         rig.gw.deliver_signal(signum)  # pending before run_clear's first check
         return real(inv)
 
+    def no_render(*args: Any) -> Any:
+        raise AssertionError("the first signal check must fire before the render")
+
     monkeypatch.setattr(cli_module, "run_clear", signalled)
+    monkeypatch.setattr(send_module, "build_clear_plan", no_render)
     assert rig.run(CLEAR) == (128 + signum, "", "")
     assert rig.gw.connections == [] and not rig.state_dir.exists()
 
@@ -499,7 +503,7 @@ def test_a_signal_after_the_render_is_128_plus_n_with_no_send_and_no_log(
     assert rig.gw.connections == [] and not rig.state_dir.exists()
 
 
-def test_clear_prints_and_flushes_the_result_before_it_writes_the_log(
+def test_clear_prints_the_result_before_it_writes_the_log(
     rig: Rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen: list[str] = []
