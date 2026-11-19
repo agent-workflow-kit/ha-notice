@@ -69,6 +69,8 @@ Implements [interface.md](interface.md) and [design.md](design.md). The issues f
 **Tests**: validate golden files with the check names `config`, `credential`, `probe`, `test_message`; probe against the fake server (`GET /api/` only); `validate` never prompts; plain `validate` with `enabled: false` exits 0 with `enabled: false`, and exits 12 with a broken credential; with `--test-message` or `--probe` it exits 22 with no call and before any check, even with an unset credential; `validate --dry-run --test-message` still sends; probe with a 200 `[]` (fails, `api_ok` false), a 200 `{}` (ok), 401, 404, a stalled host and a retry on 429; command-keyword rows: NUL then the word (sanitized first, then refused) and `update_` (empty tail) refused; live tests (plain, tag replacement, link tap, a long message, the Android markup look of V20, the `GET /api/` response, an unreachable-host timeout).
 **Status**: Complete
 
+The live-verification checklist (#36) was run once against the maintainer's own Home Assistant (run 570c2a): V7, the wrong-token 401, the unreachable-host timeout and V18 are settled with the defaults unchanged, and V8, V9, V10, V20, the self-signed certificate, the path prefix and other notify services are deferred with their defaults standing; the record is on #36.
+
 ## Version roadmap
 
 - **0.x**: Stages 0 to 4.

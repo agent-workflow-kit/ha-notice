@@ -28,7 +28,8 @@ from tests.live.support import (
 # One word per family, in the order of docs/interface.md (Command messages). Each family is
 # sent as the whole message; the title names the word so the person can tell them apart. This is
 # a SAMPLE, not an exhaustive list of what the companion apps accept; effects vary by app version
-# and platform and are unverified here. The maintainer reviews the list.
+# and platform and are unverified here. The maintainer reviews the list. The kiosk_ family is
+# left out until its companion-app documentation is confirmed; the tool still refuses it.
 FAMILY_WORDS = (
     "tts",
     "clear_notification",
@@ -38,7 +39,6 @@ FAMILY_WORDS = (
     "update_complications",
     "update_widgets",
     "command_screen_on",
-    "kiosk_mode",
 )
 
 

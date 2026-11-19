@@ -371,7 +371,7 @@ def test_every_family_word_is_flagged_and_every_family_has_a_word() -> None:
     from tests.live.test_live_commands import FAMILY_WORDS
 
     assert all(check_command_keyword(word) for word in FAMILY_WORDS)
-    for family in ("tts", "command_", "kiosk_", "update_", "clear_", "remove_", "request_"):
+    for family in ("tts", "command_", "update_", "clear_", "remove_", "request_"):
         assert any(w.startswith(family) for w in FAMILY_WORDS), family
 
 
